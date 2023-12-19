@@ -158,6 +158,6 @@ def search_sql(db='sqlite:///intermediate/aa/asvs.db', single=False, table='cdrs
 		print(f"{single_msg}: {fd}")
 		fd = fd.iloc[0,:]
 	elif (len(fd) == 0):
-		print(failure_message)
+		print(failure_msg)
 
 	return fd

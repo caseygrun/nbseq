@@ -10,14 +10,14 @@ from sklearn.manifold import TSNE
 
 
 def _ordinate_decomposition_tsne(decomposition_cls = TruncatedSVD, tsne_cls=TSNE):
-    def _ordinate(data, samples, observations, n_components=2, decomp_kwargs={}, **kwargs):
+    def _ordinate(data, samples, observations, n_components=2, decomp_kwargs={}, n_jobs=1, **kwargs):
         method_name = (decomposition_cls.__name__ + '-' + tsne_cls.__name__)
 
         _ord = decomposition_cls(**decomp_kwargs)
         _ord.fit(data)
         ft_ord = _ord.transform(data)
 
-        _tsne = tsne_cls(n_components=n_components, **kwargs)
+        _tsne = tsne_cls(n_components=n_components, n_jobs=n_jobs, **kwargs)
         _tsne.fit(ft_ord)
         ft_tsne = _tsne.fit_transform(ft_ord)
 
@@ -32,7 +32,7 @@ def _ordinate_decomposition_tsne(decomposition_cls = TruncatedSVD, tsne_cls=TSNE
     return _ordinate
 
 def _ordinate_decomposition(method_name, method_cls):
-    def _ordinate(data, samples, observations, **kwargs):
+    def _ordinate(data, samples, observations, n_jobs=1, **kwargs):
         _ord = method_cls(**kwargs)
         _ord.fit(data)
         ft_ord = _ord.transform(data)
@@ -74,8 +74,8 @@ def mds_eigs(A):
     return np.sqrt(eigen_val)
 
 def _ordinate_mds(method_name, method_cls):
-    def _ordinate(data, samples, observations, **kwargs):
-        _ord = method_cls(**kwargs)
+    def _ordinate(data, samples, observations, n_jobs=1, **kwargs):
+        _ord = method_cls(n_jobs=n_jobs, **kwargs)
         _ord.fit(data)
         ft_ord = _ord.transform(data)
 

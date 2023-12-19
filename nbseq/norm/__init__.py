@@ -9,7 +9,7 @@ from ..ft import read_sparse_dir, write_biom, to_anndata
 from ..utils import run_cmd, mkdirp
 
 
-def scran(ft=None, ft_path=None, out_path=None, obs_path=None, var_path=None, conda=None, verbose=True):
+def scran(ft=None, ft_path=None, out_path=None, obs_path=None, var_path=None, conda=None, verbose=True, return_out=None):
 
 	with tempfile.TemporaryDirectory() as tmpdir:
 
@@ -39,13 +39,17 @@ def scran(ft=None, ft_path=None, out_path=None, obs_path=None, var_path=None, co
 		ft_out = read_sparse_dir(tmp_out_path)
 
 	if out_path is not None:
-		write_biom(ft_out)
+		write_biom(ft_out, out_path)
 
-	if ft is not None:
-		obs = ft.obs.join(obs)
-		var = ft.var.join(var)
-		# out.obs_names.name = ft.obs_names.name
-		# out.var_names.name = ft.var_names.name
-	
-	out = to_anndata(ft_out, obs=obs, var=var)
-	return out
+	if return_out is None:
+		return_out = out_path is None	
+
+	if return_out:
+		if ft is not None:
+			obs = ft.obs.join(obs)
+			var = ft.var.join(var)
+			# out.obs_names.name = ft.obs_names.name
+			# out.var_names.name = ft.var_names.name
+
+		out = to_anndata(ft_out, obs=obs, var=var)
+		return out

@@ -1,28 +1,28 @@
 """calculate distances and distributions of distances between features (VHH sequences)
 """
-
-
-from Bio.Align import _substitution_matrices as __substitution_matrices
+import abc
+import numpy as np
+from Bio.Align import _substitution_matrices as _substitution_matrices
 
 def populate_substitution_matrix(_data, invert=False, cls=_substitution_matrices.Array):
 
-    alphabet = tuple(set(s[0] for s in _data.keys()) | {'X','-'})
-    mat = _substitution_matrices.Array(alphabet, dims=2)
+	alphabet = tuple(set(s[0] for s in _data.keys()) | {'X','-'})
+	mat = _substitution_matrices.Array(alphabet, dims=2)
 
-    for s, v in _data.items():
-        mat[s[0],s[1]] = v
+	for s, v in _data.items():
+		mat[s[0],s[1]] = v
 
-    for b in ['X','-']:
-        for a in alphabet:
-            mat[a,b] = 1
-            mat[b,a] = 1
-        mat[b,b] = 0
+	for b in ['X','-']:
+		for a in alphabet:
+			mat[a,b] = 1
+			mat[b,a] = 1
+		mat[b,b] = 0
 
-    if invert:
-        for a in alphabet:
-            for b in alphabet:
-                mat[a,b] = 1-mat[a,b]
-    return mat
+	if invert:
+		for a in alphabet:
+			for b in alphabet:
+				mat[a,b] = 1-mat[a,b]
+	return mat
 
 def _get_epstein_data():
 	return {
@@ -418,15 +418,15 @@ def get_matrix(matrix='BLOSUM62',gap='-'):
 	matrix: str or Bio.Align.substitution_matrices.Array; if str, will try to load from ``substitution_matrices``, then ``Bio.Align.substitution_matrices``
 	gap: for BioPython substitution matrices, change the gap character from '*' to this
 	"""
-    if (isinstance(matrix, str) and matrix == 'identity') or matrix is None:
-        return None
-    if not isinstance(matrix, _substitution_matrices.Array):
+	if (isinstance(matrix, str) and matrix == 'identity') or matrix is None:
+		return None
+	if not isinstance(matrix, _substitution_matrices.Array):
 		if matrix in substitution_matrices:
 			matrix = substitution_matrices[matrix]
 		else:
-	        m = _substitution_matrices.load(matrix)
-	        matrix = _substitution_matrices.Array(alphabet=m.alphabet.replace('*',gap), data=m.data)
-    return matrix
+			m = _substitution_matrices.load(matrix)
+			matrix = _substitution_matrices.Array(alphabet=m.alphabet.replace('*',gap), data=m.data)
+	return matrix
 
 
 def similarity_distribution(seqs, n, matrix='BLOSUM62', gap='-', weights=None, normalize=False, null=False, n_jobs=1):
@@ -454,41 +454,55 @@ def similarity_distribution(seqs, n, matrix='BLOSUM62', gap='-', weights=None, n
 	n_jobs: int, default=1
 		how many threads to use
 	"""
-    matrix = get_matrix(matrix, gap)
-    from numpy.random import default_rng; rng = default_rng()
-    inverse = None
+	from joblib import Parallel
+	matrix = get_matrix(matrix, gap)
+	from numpy.random import default_rng; rng = default_rng()
+	inverse = None
 
 	# weight choice of sequences
-    if weights is not None:
-        p = weights / weights.sum()
+	if weights is not None:
+		p = weights / weights.sum()
 
 		# if null, make an n x 2 array where pick_idxs[i, 0] == pick_idxs[i, 1]
-        if null:
-            pick_idxs = rng.choice(np.arange(len(seqs)), size=(n,))
-            pick_idxs = np.broadcast_to(pick_idxs[:,np.newaxis],(n,2))
-        else:
-            pick_idxs = rng.choice(np.arange(len(seqs)), size=(n,2), p=p)
+		if null:
+			pick_idxs = rng.choice(np.arange(len(seqs)), size=(n,))
+			pick_idxs = np.broadcast_to(pick_idxs[:,np.newaxis],(n,2))
+		else:
+			pick_idxs = rng.choice(np.arange(len(seqs)), size=(n,2), p=p)
 
-        # filter to unique pairs of sequences to avoid re-computing distances
-        pick_idxs_uniq, inverse = np.unique(pick_idxs, return_inverse=True, axis=0)
+		# filter to unique pairs of sequences to avoid re-computing distances
+		pick_idxs_uniq, inverse = np.unique(pick_idxs, return_inverse=True, axis=0)
 
-        # picks.shape = (n, 2)
-        picks = np.column_stack( (seqs[pick_idxs_uniq[:,0]], seqs[pick_idxs_uniq[:,1]]) )
+		# picks.shape = (n, 2)
+		picks = np.column_stack( (seqs[pick_idxs_uniq[:,0]], seqs[pick_idxs_uniq[:,1]]) )
 
-    else:
-        if null:
-            picks = rng.choice(seqs, size=(n,))
-            picks = np.broadcast_to(picks[:,np.newaxis],(n,2))
-        else:
-            picks = rng.choice(seqs, size=(n,2))
+	else:
+		if null:
+			picks = rng.choice(seqs, size=(n,))
+			picks = np.broadcast_to(picks[:,np.newaxis],(n,2))
+		else:
+			picks = rng.choice(seqs, size=(n,2))
 
-    with Parallel(n_jobs=n_jobs) as pool:
-        similarities = np.array(calculate_sequence_similarities(picks, matrix, normalize=normalize, pool=pool))
+	with Parallel(n_jobs=n_jobs) as pool:
+		similarities = np.array(calculate_sequence_similarities(picks, matrix, normalize=normalize, pool=pool))
 
-    if inverse is not None:
-        return similarities[inverse]
-    else:
-        return similarities
+	if inverse is not None:
+		return similarities[inverse]
+	else:
+		return similarities
+
+def calculate_similarity_matrix(seqs, **kwargs):
+	from skbio.stats.distance import DissimilarityMatrix
+	import numpy as np
+	import itertools
+	seq_pairs = itertools.combinations(seqs, 2)
+	dm = np.zeros((len(seqs),) * 2)
+	index = dict(zip(seqs, range(len(seqs))))
+	scores = calculate_sequence_similarities(seq_pairs=seqs, **kwargs)
+	for (seq1, seq2), score in zip(seq_pairs, scores):
+		dm[index[seq1], index[seq2]] = score
+		dm[index[seq2], index[seq1]] = score
+	return DissimilarityMatrix(dm, seqs)
 
 def calculate_sequence_similarities(seq_pairs, matrix=None, normalize=False, pool=None):
 	"""calculates similarity metric on an array of sequence pairs
@@ -504,34 +518,38 @@ def calculate_sequence_similarities(seq_pairs, matrix=None, normalize=False, poo
 	Returns
 	-------
 	ndarray
-	    vector of similarity scores for all pairs in seq_pairs, len = n
+		vector of similarity scores for all pairs in seq_pairs, len = n
 	"""
-    if pool is None:
-        pool = Parallel()
-    if matrix is None:
-        if normalize:
-            _f = lambda s1, s2: sum(c1==c2 for c1, c2 in zip(s1, s2))/len(s1)
-        else:
-            _f = lambda s1, s2: sum(c1==c2 for c1, c2 in zip(s1, s2))
-    else:
-        if normalize:
-            _f = lambda s1,s2: sum(matrix[c1, c2] for c1, c2 in zip(s1, s2)) / max(len_ungapped(s1),len_ungapped(s2))
-        else:
-            _f = lambda s1,s2: sum(matrix[c1, c2] for c1, c2 in zip(s1, s2))
-    scores = pool(delayed( _f )(s1,s2)
-        for s1, s2 in seq_pairs)
-    return scores
+	from joblib import Parallel, delayed
+	from ..utils import len_ungapped
+
+	if pool is None:
+		pool = Parallel()
+	if matrix is None:
+		if normalize:
+			_f = lambda s1, s2: sum(c1==c2 for c1, c2 in zip(s1, s2))/len(s1)
+		else:
+			_f = lambda s1, s2: sum(c1==c2 for c1, c2 in zip(s1, s2))
+	else:
+		if normalize:
+			_f = lambda s1,s2: sum(matrix[c1, c2] for c1, c2 in zip(s1, s2)) / max(len_ungapped(s1),len_ungapped(s2))
+		else:
+			_f = lambda s1,s2: sum(matrix[c1, c2] for c1, c2 in zip(s1, s2))
+	scores = pool(delayed( _f )(s1,s2)
+		for s1, s2 in seq_pairs)
+	return scores
 
 def null_similarity_distribution(*args, **kwargs):
-    return similarity_distribution(*args, null=True, **kwargs)
+	return similarity_distribution(*args, null=True, **kwargs)
 
 def identity_distribution(seqs, n, matrix=None, normalize=True, **kwargs):
-    return similarity_distribution(seqs, n, matrix=matrix, normalize=normalize, **kwargs)
+	return similarity_distribution(seqs, n, matrix=matrix, normalize=normalize, **kwargs)
 
 
 def plot_similarity_distribution_with_sizes(data_frames,
 	ns = [1000,10_000,50_000,100_000],
 	labels=['alpaca','synthetic'],
+	seq_col='align',
 	matrix=epstein,
 	normalize=True,n_jobs=4):
 	"""plot the ``similarity_distribution`` of one or more sets of sequences, subsampling at different values of ``n``
@@ -541,30 +559,32 @@ def plot_similarity_distribution_with_sizes(data_frames,
 	data_frames : dict of str:(pd.Series or list), or list
 		 sequences to subsample from
 	ns : array_like
-	    values to use for ``n`` when calling ``similarity_distribution``; will produce one plot per entry
+		values to use for ``n`` when calling ``similarity_distribution``; will produce one plot per entry
 	"""
+	import matplotlib.pyplot as plt
+	import seaborn as sns
 
-    fig, axs = plt.subplots(nrows=len(ns), figsize=(4,len(ns)*3))
+	fig, axs = plt.subplots(nrows=len(ns), figsize=(4,len(ns)*3))
 
-    for i,n in enumerate(ns):
+	for i,n in enumerate(ns):
 		data = {}
 		if isinstance(data_frames, abc.Mapping):
-			_items = data_frames.items():
+			_items = data_frames.items()
 			for label, df in data_frames.items():
-	 			data[label] = similarity_distribution(df[seq_col], n, matrix=matrix, n_jobs=n_jobs, normalize=normalize)
+				data[label] = similarity_distribution(df[seq_col], n, matrix=matrix, n_jobs=n_jobs, normalize=normalize)
 		elif len(labels) == len(data_frames):
-			 for label, df in zip(labels, data_frames):
- 	 			data[label] = similarity_distribution(df[seq_col], n, matrix=matrix, n_jobs=n_jobs, normalize=normalize)
+			for label, df in zip(labels, data_frames):
+				data[label] = similarity_distribution(df[seq_col], n, matrix=matrix, n_jobs=n_jobs, normalize=normalize)
 
-        g = sns.histplot(data=data,
-                         common_norm=True,
+		g = sns.histplot(data=data,
+						 common_norm=True,
 						 ax=axs[i],
 						 element="step");
-        if normalize:
-            axs[i].set_xlabel('Fraction of differing residues');
-        else:
-            axs[i].set_xlabel('# of differing residues');
-        axs[i].set_title(f'n = {n:.0e} sequence pairs')
-        axs[i].set_ylabel('# pairs');
-    plt.tight_layout()
-    return fig, axs
+		if normalize:
+			axs[i].set_xlabel('Fraction of differing residues');
+		else:
+			axs[i].set_xlabel('# of differing residues');
+		axs[i].set_title(f'n = {n:.0e} sequence pairs')
+		axs[i].set_ylabel('# pairs');
+	plt.tight_layout()
+	return fig, axs

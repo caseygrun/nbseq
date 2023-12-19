@@ -25,7 +25,7 @@ def _fortify_samples(ft_ad):
 
 
 def collapse_top_shared_asvs(ft_ad, ids_1, ids_2, n=20, top_from_samples=None, relative=False):
-
+    from ..ft import to_relative as ft_to_relative_abundance
     ft_samples = set(ft_ad.obs_names)
     ids_1 = list(ft_samples.intersection(ids_1))
     ids_2 = list(ft_samples.intersection(ids_2))
@@ -68,52 +68,17 @@ def collapse_top_shared_asvs(ft_ad, ids_1, ids_2, n=20, top_from_samples=None, r
 
     return anndata.concat([ft_top, ft_other], axis=1)
 
-def collapse_top_asvs(ft_ad, samples, n=20, top_from_samples=None, relative=False):
-
-    if top_from_samples is None:
-        top_from_samples = samples
-
-    ft2 = ft_ad[top_from_samples,:]
-
-    asv_counts = ft_sum(ft2, axis='var').sort_values(ascending=False)
-    top_asvs = asv_counts.iloc[0:n]
-
-    if relative:
-        ft_ad = to_relative(ft_ad)
-
-    ft_samples = ft_ad[samples,:]
-    ft_top = ft_samples[:,top_asvs.index.values]
-
-    # sum top ASVs for each sample
-    ft_top_sum = ft_top.X.sum(axis=1)
-
-    # sum all ASVs for each sample
-    ft_samples_sum = ft_samples.X.sum(axis=1)
-
-    # calculate sum of all non-top ASVs for each sample
-    # interestingly, much faster to get sum of non-top-ASVs by summing everything,
-    # then summing top ASVs and subtracting, as opposed to summing non-top-ASVs...
-    # the below options are ~10x slower
-    #     other_sum = fts[:,other_asvs.index.values].X.sum(axis=1)
-    #     other_sum = ft_sum(fts[:,other_asvs.index.values])
-    other_asv_sum = ft_samples_sum - ft_top_sum
-
-    ft_other = AnnData(
-       other_asv_sum,
-       obs=pd.DataFrame(index=ft_samples.obs_names),
-       var=pd.DataFrame(index=['others'])
-    )
-    return anndata.concat([ft_top, ft_other], axis=1, merge="first")
+from ..ft import collapse_top_asvs, fortify_top_asvs
 
 def make_md5_colors(hashes, special_values={'others':"#aaaaaa", 'unshared':"#aaaaaa", 'other shared': "#999999"}):
     return [hash_to_color(h, **special_values) for h in hashes]
 
-def _scale_manual_md5(hashes, sort=True, special_values={'others':"#aaaaaa", 'unshared':"#aaaaaa", 'other shared': "#999999"}):
+def _scale_manual_md5(hashes, sort=True, special_values={'others':"#aaaaaa", 'unshared':"#aaaaaa", 'other shared': "#999999"}, **kwargs):
     if sort:
         hashes = sorted(list(hashes[~np.isin(hashes, list(special_values))]) + list(special_values.keys()))
     labels = [h if h in special_values else pretty_hex(h) for h in hashes]
     values = make_md5_colors(hashes, special_values=special_values)
-    return dict(values=values, limits=hashes, breaks=hashes, labels=labels)
+    return {**dict(values=values, limits=hashes, breaks=hashes, labels=labels), **kwargs}
 
 def scale_fill_md5(hashes, **kwargs):
     return p9.scale_fill_manual(**_scale_manual_md5(hashes, **kwargs))
@@ -121,7 +86,20 @@ def scale_fill_md5(hashes, **kwargs):
 def scale_color_md5(hashes, **kwargs):
     return p9.scale_color_manual(**_scale_manual_md5(hashes, **kwargs))
 
-def top_asv_barplot(df, special_values={'others':"#aaaaaa"}, limits=None, x='r', facet=None, title=None, **kwargs):
+
+def alt_scale_features(features, sort=False, **kwargs):
+    import altair as alt
+    import pandas as pd
+
+    if isinstance(features, pd.Series):
+        features = features.values
+    if sort:
+        features = sorted(features)
+
+    return alt.Scale(domain=features, range=[hash_to_color(f) for f in features])
+
+
+def top_asv_barplot(df, special_values={'others':"#aaaaaa"}, limits=None, x='r', feature_name="feature", facet=None, title=None, **kwargs):
 
     # not sure why this is necessary, but get this error if omitted:
     # TypeError: object of type 'NoneType' has no len()
@@ -133,7 +111,7 @@ def top_asv_barplot(df, special_values={'others':"#aaaaaa"}, limits=None, x='r',
 
     gg = (p9.ggplot(df, p9.aes(x=x,y='abundance',fill='feature'))
             + p9.geom_col()
-            + scale_fill_md5(df['feature'].unique(), special_values=special_values)
+            + scale_fill_md5(df['feature'].unique(), special_values=special_values, name=feature_name)
             + x_scale
             + p9.scale_y_continuous(name='Abundance')
          )
@@ -150,11 +128,11 @@ def top_asv_barplot(df, special_values={'others':"#aaaaaa"}, limits=None, x='r',
     return gg
 
 def top_asv_lineplot(
-    df, special_values={'others':"#aaaaaa"}, limits=None, x='r', facet=None,
+    df, special_values={'others':"#aaaaaa"}, limits=None, x='r', facet=None, title=None,
     figsize=(12,8), **kwargs):
 
     gg = (p9.ggplot(df, p9.aes(x=x,y='abundance',fill='feature'))
-            + p9.geom_line(aes(group='feature'))
+            + p9.geom_line(p9.aes(group='feature'))
             + scale_color_md5(df['feature'].unique(), special_values=special_values)
             + p9.scale_x_discrete(name='Round')
             + p9.scale_y_continuous(name='Abundance')
@@ -222,7 +200,63 @@ def top_asv_plot_phylo(
 
 
 
+def rank_abundance_plot(ft, log=True, pct=False, obs=True, transform=None,
+                        point=False, line=True,
+                        n_head=10,n_sample=None,n_tail=10,
+                         **kwargs):
+    """make plot of VHH rank vs. [log-]abundance (Whittaker plots)
+
+    Parameters
+    ----------
+    ft : anndata.AnnData
+        feature table
+    log : bool, optional
+        plot log(abundance) or linear abundance, by default True
+    pct : bool, optional
+        plot percentile on X axis? if false, plot rank on x axis, by default False
+    obs : bool, optional
+        if True, when feature table is fortified to a DataFrame, join the `obs` metadata to the output so that its columns can be referenced, by default True
+
+    Returns
+    -------
+    ggplot
+    """
+    from ..ft import fortify
+    df = fortify(ft, relative=True, obs=obs)
+    
+    if log:
+        df['abundance'] = np.log10(df['abundance'])
+    df['rank'] = df.groupby('ID')['abundance'].rank(ascending=False, pct=pct)
+
+    if n_sample is not None:
+        if not isinstance(n_sample, dict):
+            n_sample = {'n': n_sample}
+
+        df = pd.concat([
+            df.groupby(['ID', 'round']).head(n_head),
+            df.groupby(['ID', 'round']).sample(**n_sample),
+            df.groupby(['ID', 'round']).tail(n_tail)
+        ])
+
+    if transform is not None:
+        df = transform(df)
+
+    gg = (p9.ggplot(df, p9.aes(x='rank',y='abundance',**kwargs)) 
+            + p9.xlab('feature percentile' if pct else 'feature rank') 
+            + p9.ylab('log10(relative abundance)' if log else 'relative abundance'))
+    if point:
+        if not isinstance(point, dict):
+            point = {}
+        gg += p9.geom_point(**point)
+    if line:
+        if not isinstance(line, dict):
+            line = {}
+        gg += p9.geom_line(**line)
+    return gg
+
+
 def summarize_features(df, features=None, seq_col='CDR3', id_col='CDR3ID', max_features=100, title=None):
+    from .syntax import aa_highlighter
     caption = []
     if title is not None:
         caption = [f"<strong>{title}</strong>"]
@@ -258,6 +292,8 @@ def summarize_features(df, features=None, seq_col='CDR3', id_col='CDR3ID', max_f
 
 def compare_samples(ids_1, ids_2, ft, n=20, names=['1','2'], show_tables=True, **kwargs):
     from ..distance import shared_reads, shared_reads_frac, shared_features
+    from .utils import display_accordion, display_table
+    from IPython.display import display
 
     print(f"Comparing samples {ids_1} vs. {ids_2}...")
 
@@ -359,6 +395,7 @@ def compare_samples(ids_1, ids_2, ft, n=20, names=['1','2'], show_tables=True, *
     df_reads['partition'] = df_reads['partition'].astype('category').cat.reorder_categories([f'reads_only_{n1}',f'reads_shared_{n1}',f'reads_shared_{n2}',f'reads_only_{n2}'])
 
 
+    from plotnine import ggplot, aes, geom_col, theme, element_text
 #     display_table([[
     display(ggplot(df_features,
                aes(x='pair',y='features',fill='partition')) +
@@ -380,6 +417,9 @@ def compare_samples(ids_1, ids_2, ft, n=20, names=['1','2'], show_tables=True, *
 
 def design_heatmap(des, log=False, row_cluster=False, col_cluster=False, figsize=(30,10), **kwargs):
     from matplotlib.colors import LogNorm, SymLogNorm, Normalize
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
     kwargs = { 'norm': LogNorm() if log else None, **kwargs }
     if row_cluster or col_cluster:
         sns.clustermap(des, figsize=figsize, **kwargs)
@@ -393,7 +433,8 @@ def plot_design_distributions(designs, n_features=100, n_points = 10000):
     """
 
     from numpy.linalg import LinAlgError
-
+    import matplotlib.pyplot as plt
+    import seaborn as sns
 
     palette=sns.color_palette(['tab:blue']*n_features)
 

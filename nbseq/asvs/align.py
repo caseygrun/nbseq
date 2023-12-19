@@ -6,11 +6,6 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
-from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
-import Bio.SeqIO
-
-import Bio.Align
 
 from ..utils import *
 
@@ -250,7 +245,7 @@ def samfile_get_query_names(samfile_path):
 	import pysam
 	with pysam.AlignmentFile(samfile_path, "rb") as samfile:
 		query_names = [rec.query_name for rec in samfile.fetch(until_eof=True)]
-		query_names = set(query_names)
+		query_names = list(set(query_names))
 	return query_names
 
 
@@ -263,9 +258,9 @@ def export_aligned_reads_paired(samfile_path=None,
 	Parameters
 	----------
 	samfile_path : str
-	    Path to a read name-sorted BAM file
+		Path to a read name-sorted BAM file
 	reference : str or Bio.Seq.Seq, optional
-	    Reference sequence
+		Reference sequence
 	reference_path : str, optional
 		Path to the reference sequence in FASTA format
 	suppress_amber : bool, default=True
@@ -289,7 +284,7 @@ def export_aligned_reads_paired(samfile_path=None,
 	Returns
 	-------
 	pd.DataFrame
-	    index: names of the query sequences, e.g. pair_IDs
+		index: names of the query sequences, e.g. pair_IDs
 		columns:
 		- seq: full length sequence, padded with gap characters to the length of
 		  the translated reference sequence (i.e. until the end of the reference
@@ -440,8 +435,8 @@ def export_aligned_reads_paired(samfile_path=None,
 					stats['overlapping_disagree'] += 1
 					if verbose:
 						print(f"WARNING: {label}: overlapping sequences do not agree:\n"
-						      f"         F> {int_seq_fwd}\n"
-						      f"         R> {int_seq_rev}")
+							  f"         F> {int_seq_fwd}\n"
+							  f"         R> {int_seq_rev}")
 				int_seq = int_seq_fwd
 				rev_seq = rev.query_sequence[rev.query_alignment_start:][overlap_len:]
 
@@ -524,46 +519,47 @@ def export_aligned_reads(samfile_path=None,
 
 	if verbose: print(f"Translating {len(table)} sequences from samfile...")
 
-	for row in samfile.fetch():
+	with pysam.AlignmentFile(samfile_path, "rb") as samfile:
+		for row in samfile.fetch():
 
-		# identify the first complete codon
-		# the correct reading frame for the reference starts with base `reference_frame_start`
+			# identify the first complete codon
+			# the correct reading frame for the reference starts with base `reference_frame_start`
 
-		# codon:       0     | 1     | 2
-		# refer: 0 1 | 2 3 4 | 5 6 7 | 8
-		#            | G C G | G C C | G C T
-		# query: - -   - - G   G C C   G C T
-		# reference_start = 4
-		# reference_frame_start = 2
-		# first_codon = (reference_start - reference_frame_start) // 3 + 1 = (4 - 2) // 3 + 1
-		first_codon = (((row.reference_start - reference_frame_start) // 3) + 1)
+			# codon:       0     | 1     | 2
+			# refer: 0 1 | 2 3 4 | 5 6 7 | 8
+			#            | G C G | G C C | G C T
+			# query: - -   - - G   G C C   G C T
+			# reference_start = 4
+			# reference_frame_start = 2
+			# first_codon = (reference_start - reference_frame_start) // 3 + 1 = (4 - 2) // 3 + 1
+			first_codon = (((row.reference_start - reference_frame_start) // 3) + 1)
 
-		# codon:           | 0     | 1     | 2
-		# refer: 0 1 2 3 4 | 5 6 7 | 8 9 10
-		#                  | G C G | G C C | G C T
-		# reference_start:       ^
-		#
-		# query:       0 1   2 3 4   5 6 7   8 9 10
-		#        - - - A A   A A G   G C C   G C T
-		# query_alignment_start: ^
-		# want first_base =          ^
-		#
-		# reference_start = 7
-		# reference_frame_start = 5
-		# query_alignment_start = 4
-		# first_codon = (reference_start - reference_frame_start) // 3 + 1 = (7 - 5) // 3 + 1 = 1
-		# first_base = query_alignment_start + (first_codon * 3 - (reference_start - reference_frame_start)) = 4 + (1 * 3 - (7-5)) = 4 + 3 - 2 = 5
-		first_query_base = row.query_alignment_start + (first_codon * 3 - (row.reference_start - reference_frame_start))
+			# codon:           | 0     | 1     | 2
+			# refer: 0 1 2 3 4 | 5 6 7 | 8 9 10
+			#                  | G C G | G C C | G C T
+			# reference_start:       ^
+			#
+			# query:       0 1   2 3 4   5 6 7   8 9 10
+			#        - - - A A   A A G   G C C   G C T
+			# query_alignment_start: ^
+			# want first_base =          ^
+			#
+			# reference_start = 7
+			# reference_frame_start = 5
+			# query_alignment_start = 4
+			# first_codon = (reference_start - reference_frame_start) // 3 + 1 = (7 - 5) // 3 + 1 = 1
+			# first_base = query_alignment_start + (first_codon * 3 - (reference_start - reference_frame_start)) = 4 + (1 * 3 - (7-5)) = 4 + 3 - 2 = 5
+			first_query_base = row.query_alignment_start + (first_codon * 3 - (row.reference_start - reference_frame_start))
 
-		# extract an in-frame sequence
-		seq_from_first_full_codon = row.query_sequence[first_query_base:]
+			# extract an in-frame sequence
+			seq_from_first_full_codon = row.query_sequence[first_query_base:]
 
-		# pad to length of reference
-		seq_padded = pad_sequence_na(seq_from_first_full_codon, len(reference_translated)*3, first_query_base)
+			# pad to length of reference
+			seq_padded = pad_sequence_na(seq_from_first_full_codon, len(reference_translated)*3, first_query_base)
 
-		table.loc[row.query_name, 'seq'] = seq_padded
+			table.loc[row.query_name, 'seq'] = seq_padded
 
-	return table
+		return table
 
 
 def translate_aligned(seqs,
@@ -624,6 +620,7 @@ def translate_aligned(seqs,
 	import re
 	import Bio.Data.CodonTable
 	from Bio.Data.CodonTable import TranslationError
+	from Bio.Seq import Seq
 
 	if suppress_amber:
 		codon_table = Bio.Data.CodonTable.unambiguous_dna_by_id[999]
@@ -696,20 +693,20 @@ def translate_aligned(seqs,
 	# return seqs.apply(translate_seq)
 
 
-def get_pairwise_aligner(library, aa=False, mode='local', **kwargs):
-	from Bio.Align import substitution_matrices
+def get_pairwise_aligner(library, aa=False, mode='local', ambiguous_match_score=1, **kwargs):
+	from Bio.Align import substitution_matrices, PairwiseAligner
 
-	aligner = Bio.Align.PairwiseAligner()
+	aligner = PairwiseAligner()
 	aligner.alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ-'
 
 	if aa:
 		aligner.substitution_matrix = substitution_matrices.load('BLOSUM62')
 
 		# don't penalize matches to X, otherwise CDRs align badly
-		aligner.substitution_matrix[:,'X'] = 0.5
+		aligner.substitution_matrix[:,'X'] = ambiguous_match_score
 	else:
 		aligner.substitution_matrix = substitution_matrices.load('NUC.4.4')
-		aligner.substitution_matrix[:,'N'] = 0.5
+		aligner.substitution_matrix[:,'N'] = ambiguous_match_score
 
 	# target = reference
 
@@ -723,7 +720,6 @@ def get_pairwise_aligner(library, aa=False, mode='local', **kwargs):
 		# the internal regions of the target (reference) sequence should be
 		# generously long enough to accomodate variable length query sequences.
 		aligner.target_internal_gap_score = -10000
-
 
 		if mode == 'global':
 
@@ -741,10 +737,15 @@ def get_pairwise_aligner(library, aa=False, mode='local', **kwargs):
 			aligner.target_left_gap_score  = -1
 			aligner.target_right_gap_score = -1
 
-		# still need to penalize gaps somewhat, else
+		# penalize left and right gap opening somewhat
 		aligner.query_open_gap_score = -1
 		aligner.query_extend_gap_score = -0.5
-		aligner.mismatch_score = -1
+
+		# penalize internal gaps further; these will surely be introduced in CDR3, 
+		# but this ensure that there are a few matching bases to make them worthwhile
+		aligner.query_internal_open_gap_score=-4
+
+		# aligner.mismatch_score = -1
 
 	# SYNTHETIC
 	elif library == 'synthetic':
@@ -776,10 +777,18 @@ def align_to_reference(seqs, reference_path, library,
 
 	aligner = get_pairwise_aligner(library=library, aa=aa, mode=mode, **kwargs)
 
+	if verbose > 1:
+		if hasattr(aligner, '__getstate__'):
+			print(aligner.__getstate__())
+
 	if aa:
 		reference = translate_reference(reference = reference, suppress_amber=suppress_amber)
 		if reference_length is not None:
 			reference = reference[:reference_length]
+
+		if verbose:
+			print(reference)
+
 	min_length = min([min_length, len(reference)])
 
 	pool = Parallel(n_jobs=threads)
@@ -804,22 +813,43 @@ def _align_to_reference(seq, reference, aligner, min_length=90, verbose=False, r
 	if return_alignment:
 		return alignments[0]
 
-	alignment = str(alignments[0])
+	alignment = alignments[0]
+	# somewhere along the line, `Bio.Align.PairwiseAlignment` objects were
+	# deprecated and replaced with `Bio.Align.Alignment`, which has a different
+	# `__str__` implementation that also prints the sequence name. Anyway, it 
+	# is now possible to get a string with the aligned sequence (including 
+	# gaps), just using `Alignment.__getitem__`, so we use that. 
 
-	ref,aln,s,*_ = alignment.split("\n")
+	# old implementation: class(alignment) == Bio.Align.PairwiseAlignment
+	# alignment = str(alignments[0])
+	# ref,aln,s,*_ = alignment.split("\n")
+	if 'PairwiseAlignment' in type(alignment).__name__:
+		alignment = str(alignment)
+		ref,aln,s,*_ = alignment.split("\n")
+	else:
+		# alignment[k] (equivalent to alignment[k, :])
+		# return a string with the aligned sequence (including gaps) for the
+		# selected columns, where k = 0 represents the target and k = 1
+		# represents the query sequence
+		ref = alignment[0, :]
+		s = alignment[1, :]
+
 	loffset = len(ref) - len(ref.lstrip('-'))
 	roffset = len(ref) - len(ref.rstrip('-'))
-
+	
 	# s[i:-0] will produce an empty string, whereas s[i:None] == s[i:]
 	st = s[loffset:-roffset or None]
 	if verbose:
-		print(
-f"""{len(alignments)} alignments
+		if verbose > 1:
+			print(f"""\
+{len(alignments)} alignments
 {str(alignment)}
-trimming {loffset} from left / {roffset} from right > {st}
+trimming {loffset} from left / {roffset} from right >
+{st}
 ================================================================================
-"""
-			)
+""")
+		else:
+			print(f"{len(alignments)} alignments\n{str(alignment)}\n")
 	return st
 
 
@@ -837,30 +867,34 @@ def pairwise_align(reference, seq, library,
 
 
 def align_chromatograms(paths, reference_path, CDRs=None, reference_frame_start_nt=0, rc=False):
-    """aligns chromatograms to a reference sequence and extracts CDRs
-    paths: iterable of str, paths to chromatograms in .scf format
-    reference_path: str, path to reference sequence
-    reference_frame_start_nt: int, nt where the reading frame of the reference sequence begins
-    CDRs: dict of str:tuple, keys are CDR names, values are (start_nt, end_nt) positions for the CDR, 0-indexed, half-open
-    rc: bool, True to reverse-complement chromatogram sequence before aligning to reference
-    """
+	"""aligns chromatograms to a reference sequence and extracts CDRs
+	paths: iterable of str, paths to chromatograms in .scf format
+	reference_path: str, path to reference sequence
+	reference_frame_start_nt: int, nt where the reading frame of the reference sequence begins
+	CDRs: dict of str:tuple, keys are CDR names, values are (start_nt, end_nt) positions for the CDR, 0-indexed, half-open
+	rc: bool, True to reverse-complement chromatogram sequence before aligning to reference
+	"""
 
-    seqs = {}
-    for f in paths:
-        seq, *_ = bioconvert.io.scf.read_scf(f)
-        if rc: seq = nbseq.utils.rc(seq)
-        seqs[f] = seq
+	import bioconvert.io.scf
+	from ..utils import rc as revcomp
+	from ..cdrs import extract_CDRs
+	seqs = {}
+	for f in paths:
+		seq, *_ = bioconvert.io.scf.read_scf(f)
+		if rc:
+			seq = revcomp(seq)
+		seqs[f] = seq
 
-    out = nbseq.asvs.align.align_to_reference(seqs.values(),reference_path=reference_path,
-                 reference_frame_start=reference_frame_start_nt,
-                 library='alpaca',
-                 mode='local', verbose=False
-          )
+	out = align_to_reference(seqs.values(),reference_path=reference_path,
+				 reference_frame_start=reference_frame_start_nt,
+				 library='alpaca',
+				 mode='local', verbose=False
+		  )
 
-    df = pd.DataFrame({'file':list(seqs.keys()), 'seq':out})
+	df = pd.DataFrame({'file':list(seqs.keys()), 'seq':out})
 
-    if CDRs is not None:
-        df = pd.merge(df, nbseq.extract_CDRs(df['seq'], CDRs=CDRs),
-                      left_index=True, right_index=True)
-    df['name'] = df['file'].apply(lambda x: os.path.splitext(os.path.basename(x))[0])
-    return df
+	if CDRs is not None:
+		df = pd.merge(df, extract_CDRs(df['seq'], CDRs=CDRs),
+					  left_index=True, right_index=True)
+	df['name'] = df['file'].apply(lambda x: os.path.splitext(os.path.basename(x))[0])
+	return df

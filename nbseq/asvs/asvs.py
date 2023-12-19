@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from Bio import SeqIO
 
 from ..utils import lookup
 
@@ -19,6 +18,7 @@ def get_identifier(space):
 
 def remove_chimeras(seqs, abundances, ids, chimera_algorithm = "uchime_denovo",
 	infile_fasta=None, outfile_chimeras=None, outfile_nonchimeras=None, return_nonchimeras=False):
+	from Bio import SeqIO
 
 	with tempfile.TemporaryDirectory() as tmpdir:
 		if infile_fasta is None:
@@ -34,7 +34,7 @@ def remove_chimeras(seqs, abundances, ids, chimera_algorithm = "uchime_denovo",
 		if outfile_nonchimeras is None:
 			outfile_nonchimeras = str(Path(tmpdir) / 'nonchimeras.fasta')
 
-		cmd = ["vsearch", "--sortbysize", f"--{chimera_algorithm}", input_fasta]
+		cmd = ["vsearch", "--sortbysize", f"--{chimera_algorithm}", infile_fasta]
 		if outfile_chimeras is not None:
 			cmd += [f"--chimeras {outfile_chimeras}"]
 		if outfile_nonchimeras is not None:
@@ -47,7 +47,7 @@ def remove_chimeras(seqs, abundances, ids, chimera_algorithm = "uchime_denovo",
 			return list(SeqIO.parse(outfile_nonchimeras))
 
 
-def fill_end_gaps_by_reference(asvs, reference):
+def fill_end_gaps_by_reference(asvs, reference, gap='-'):
 	"""replaces 5' and 3' gap characters with those from the reference sequence
 
 	each sequence in `asvs` should already be aligned to the reference
@@ -155,16 +155,60 @@ def find_similar_features(query, db=None, space='CDR3', ft=None, fd=None, verbos
 		return matches
 
 
-def project(features, from_space='CDR3', to_space='AA', method='sql', columns='*', mapping=None, fd=None, ft=None, show_query=False, **kwargs):
+def project(features, from_space='CDR3', to_space='AA', 
+	method='sql', columns='*', mapping=None, fd=None, ft=None, db=None, 
+	show_query=False, verbose=False, **kwargs):
 	"""Projects from one feature space to another, optionally retrieving feature data for the new feature space and joining to an existing feature table
 
 	For large feature datasets (e.g. nucleic acid or amino acid sequences), this
 	is best accomplished by querying a pre-populated feature space.
 
-	- method='sql', ft is not None: returns a filtered feature table ``ft``, with feature data joined to ft.var
-	- method='sql', ft=None: returns pd.DataFrame containing feature data
-	- method='mapping': returns filtered version of the feature table ``ft``
+	Parameters
+	----------
+	features : iterable of str
+		identifiers in `from_space`
+	from_space : str, optional
+		name of the space to project from, by default 'CDR3'
+	to_space : str, optional
+		name of the feature space to project onto , by default 'AA'
+	method : str, optional
+		how to perform the projection, by default 'sql'
+	columns : str, optional
+		if ``method='sql'``, which columns to pull from the database, by default '*'
+	mapping : mapping, optional
+		if given, should map identifiers in ``from_space`` to those in ``to_space``, by default None
+	fd : pd.DataFrame, optional
+		ignore
+	ft : anndata.AnnData, optional
+		if given, will join feature data for projected features onto this feature table, by default None
+	db : str, optional
+		if ``method='sql'``, a URL to establish the database connection
+	show_query : bool, optional
+		if ``method='sql'``, print the generated SQL query; by default False
+	**kwargs : dict
+		additional arguments passed to `db.search_sql`
+
+	Returns
+	-------
+	pd.DataFrame
+		if ``method='sql'``, ``ft is None``: dataframe containing feature data
+	anndata.AnnData
+		if ``method='sql'``, ``ft is not None``: returns a filtered feature table ``ft``, with feature data joined to ft.var
+	anndata.AnnData
+		if ``method='mapping'``: returns filtered version of the passed feature table ``ft``
+
+	Raises
+	------
+	NotImplementedError
+		_description_
+	ValueError
+		_description_
+	TypeError
+		_description_
 	"""
+
+	from ..utils import map_generic
+
 	identifiers = {
 		'NA': 'ASVID',
 		'AA': 'aaSVID',
@@ -176,12 +220,16 @@ def project(features, from_space='CDR3', to_space='AA', method='sql', columns='*
 
 	if method == 'sql':
 		from .db import search_sql, make_sql_where_clause
+		if verbose:
+			print(f"Projecting from space `{from_space}` to space `{to_space}` with method `sql`")
 
 		src_identifier = identifiers[from_space]
 		new_identifier = identifiers[to_space]
 
 		if from_space =='CDR3' and to_space == 'AA':
 			if 'aligned' in columns:
+				if verbose:
+					print("`aligned` AA sequence requested; ensure db has a covering index")
 
 				# will require a join to the `aa` table. this is extremely slow
 				# unless a proper, ideally covering, index is used.
@@ -216,9 +264,9 @@ def project(features, from_space='CDR3', to_space='AA', method='sql', columns='*
 				predicates = make_sql_where_clause(**predicates)
 				query = f"SELECT {cols} FROM `cdrs` INNER JOIN `aa` ON aa.aaSVID == cdrs.aaSVID WHERE ({predicates})"
 
-				fd = search_sql(query=query, show_query=show_query)
+				fd = search_sql(db=db, query=query, show_query=show_query)
 			else:
-				fd = search_sql(**{'table':'cdrs', 'columns':columns, src_identifier:features, 'show_query':show_query, **kwargs})
+				fd = search_sql(db=db, **{'table':'cdrs', 'columns':columns, src_identifier:features, 'show_query':show_query, **kwargs})
 
 			if ft is not None:
 				ft = ft[:,fd[new_identifier]]
@@ -276,20 +324,120 @@ def check(condition, message):
 	if not condition:
 		raise Exception(message)
 
-def marginal_frequencies(sequences,
-						counts=None,
-						abundances=None,
-						matrix=None,
-						alphabet='ACDEFGHIKLMNPQRSTVWY-',
-						characters_to_ignore=''):
-	"""
-	Generates matrix from a sequence alignment
+# def marginal_frequencies(sequences,
+# 						counts=None,
+# 						abundances=None,
+# 						matrix=None,
+# 						alphabet='ACDEFGHIKLMNPQRSTVWY-',
+# 						characters_to_ignore=''):
+# 	"""
+# 	Generates matrix from a sequence alignment
 
-	From https://github.com/jbkinney/logomaker, Copyright (c) 2019 Ammar Tareen and Justin B. Kinney
+# 	From https://github.com/jbkinney/logomaker, Copyright (c) 2019 Ammar Tareen and Justin B. Kinney
+# 	MIT License
+
+
+# 	parameters
+# 	----------
+# 	sequences: (list of strings)
+# 		A list of sequences, all of which must be the same length
+# 	counts: (None or list of numbers)
+# 		If not None, must be a list of numbers the same length os sequences,
+# 		containing the (nonnegative) number of times that each sequence was
+# 		observed. If None, defaults to 1.
+# 	to_type: (str)
+# 		The type of matrix to output. Must be 'counts', 'probability',
+# 		'weight', or 'information'
+# 	characters_to_ignore: (str)
+# 		Characters to ignore within sequences. This is often needed when
+# 		creating matrices from gapped alignments.
+
+# 	returns
+# 	-------
+# 	out_df: pd.DataFrame
+# 		A matrix of the requested type.
+# 	"""
+
+# 	# validate inputs
+
+# 	# Make sure sequences is list-like
+# 	check(isinstance(sequences, (list, tuple, np.ndarray, pd.Series)),
+# 		  'sequences must be a list, tuple, np.ndarray, or pd.Series.')
+# 	sequences = list(sequences)
+
+# 	# Make sure sequences has at least 1 element
+# 	check(len(sequences) > 0, 'sequences must have length > 0.')
+
+# 	# Make sure all elements are sequences
+# 	check(all(isinstance(seq, str) for seq in sequences),
+# 		  'sequences must all be of type string')
+
+# 	# validate characters_to_ignore
+# 	check(isinstance(characters_to_ignore, str),
+# 		  'type(seq) = %s must be of type str' % type(characters_to_ignore))
+
+# 	# Get sequence length
+# 	L = len(sequences[0])
+
+# 	# Make sure all sequences are the same length
+# 	check(all([len(s) == L for s in sequences]),
+# 		  'all elements of sequences must have the same length.')
+
+# 	# validate counts as list-like
+# 	if counts is None and abundances is not None:
+# 		counts = abundances
+# 	check(isinstance(counts, (list, tuple, np.ndarray, pd.Series)) or
+# 			(counts is None),
+# 			'counts must be None or a list, tuple, np.ndarray, or pd.Series.')
+
+# 	# make sure counts has the same length as sequences
+# 	if counts is None:
+# 		counts = np.ones(len(sequences))
+# 	else:
+# 		check(len(counts) == len(sequences),
+# 			  'counts must be the same length as sequences;'
+# 			  'len(counts) = %d; len(sequences) = %d' %
+# 			  (len(counts), len(sequences)))
+
+# 	# Create a 2D array of characters
+# 	char_array = np.array([np.array(list(seq)) for seq in sequences])
+
+# 	# Get list of unique characters
+# 	if alphabet is None:
+# 		unique_characters = np.unique(char_array.ravel())
+# 	else:
+# 		unique_characters = np.unique(list(alphabet))
+# 	unique_characters.sort()
+
+# 	# Remove characters to ignore
+# 	columns = [c for c in unique_characters if not c in characters_to_ignore]
+# 	index = list(range(L))
+# 	counts_df = pd.DataFrame(data=0, columns=columns, index=index)
+
+# 	# Sum of the number of occurrences of each character at each position
+# 	for c in columns:
+# 		tmp_mat = (char_array == c).astype(float) * counts[:, np.newaxis]
+# 		counts_df.loc[:, c] = tmp_mat.sum(axis=0).T
+
+# 	return counts_df
+
+def marginal_frequencies(sequences,
+                         counts=None,
+                         background=None,
+                         characters_to_ignore='.-',
+                         unique_characters=None):
+	"""calculates counts of each residue at each position
+
+	adapted from logomaker.src.matrix.alignment_to_matrix, with some patches
+	that result in ~4x speedup. This function is simplified and only counts 
+	residues per position. `viz.logo.alignment_to_matrix` is a drop-in replacement
+	for `logomaker.src.matrix.alignment_to_matrix` which performs transformations 
+	to probability, weight, information, etc. 
+
+	https://github.com/jbkinney/logomaker, Copyright (c) 2019 Ammar Tareen and Justin B. Kinney
 	MIT License
 
-
-	parameters
+	Parameters
 	----------
 	sequences: (list of strings)
 		A list of sequences, all of which must be the same length
@@ -297,78 +445,90 @@ def marginal_frequencies(sequences,
 		If not None, must be a list of numbers the same length os sequences,
 		containing the (nonnegative) number of times that each sequence was
 		observed. If None, defaults to 1.
-	to_type: (str)
-		The type of matrix to output. Must be 'counts', 'probability',
-		'weight', or 'information'
+	background: (array, or df)
+		Specification of background probabilities. If array, should be the
+		same length as df.columns and correspond to the probability of each
+		column's character. If df, should be a probability matrix the same
+		shape as df.
 	characters_to_ignore: (str)
 		Characters to ignore within sequences. This is often needed when
 		creating matrices from gapped alignments.
 
-	returns
+	Returns
 	-------
-	out_df: pd.DataFrame
-		A matrix of the requested type.
+	counts_df: pd.DataFrame
+		shape = (len(sequences), n_unique_characters)
+		columns = unique residues
 	"""
-
-	# validate inputs
+	from logomaker.src.matrix import transform_matrix, check, MATRIX_TYPES
 
 	# Make sure sequences is list-like
 	check(isinstance(sequences, (list, tuple, np.ndarray, pd.Series)),
-		  'sequences must be a list, tuple, np.ndarray, or pd.Series.')
-	sequences = list(sequences)
+            'sequences must be a list, tuple, np.ndarray, or pd.Series.')
+	# sequences = list(sequences)
 
 	# Make sure sequences has at least 1 element
 	check(len(sequences) > 0, 'sequences must have length > 0.')
 
 	# Make sure all elements are sequences
 	check(all(isinstance(seq, str) for seq in sequences),
-		  'sequences must all be of type string')
+            'sequences must all be of type string')
 
 	# validate characters_to_ignore
 	check(isinstance(characters_to_ignore, str),
-		  'type(seq) = %s must be of type str' % type(characters_to_ignore))
+            'type(seq) = %s must be of type str' % type(characters_to_ignore))
 
 	# Get sequence length
 	L = len(sequences[0])
 
 	# Make sure all sequences are the same length
 	check(all([len(s) == L for s in sequences]),
-		  'all elements of sequences must have the same length.')
+            'all elements of sequences must have the same length.')
 
 	# validate counts as list-like
-	if counts is None and abundances is not None:
-		counts = abundances
 	check(isinstance(counts, (list, tuple, np.ndarray, pd.Series)) or
-			(counts is None),
-			'counts must be None or a list, tuple, np.ndarray, or pd.Series.')
+            (counts is None),
+            'counts must be None or a list, tuple, np.ndarray, or pd.Series.')
 
 	# make sure counts has the same length as sequences
 	if counts is None:
 		counts = np.ones(len(sequences))
 	else:
+		counts = np.array(counts)
 		check(len(counts) == len(sequences),
-			  'counts must be the same length as sequences;'
-			  'len(counts) = %d; len(sequences) = %d' %
-			  (len(counts), len(sequences)))
+            'counts must be the same length as sequences;'
+            'len(counts) = %d; len(sequences) = %d' %
+            (len(counts), len(sequences)))
 
-	# Create a 2D array of characters
-	char_array = np.array([np.array(list(seq)) for seq in sequences])
+	# validate background
+	check(isinstance(background, (type([]), np.ndarray, pd.DataFrame)) or
+            (background is None),
+            'type(background) = %s must be None or array-like or a dataframe.' %
+            type(background))
+
+	# View as a 2D array of characters
+	# we can do this without copying since we've already checked all strings are same length
+	# char_array = np.array(sequences, dtype='str').view('U1').reshape((sequences.size, -1))
+
+	# view as np.uint32 for faster comparisons (~2x speedup)
+	char_array = np.array(sequences, dtype='str').view(
+		np.uint32).reshape((sequences.size, -1))
 
 	# Get list of unique characters
-	if alphabet is None:
+	if unique_characters is None:
 		unique_characters = np.unique(char_array.ravel())
-	else:
-		unique_characters = np.unique(list(alphabet))
+
 	unique_characters.sort()
 
 	# Remove characters to ignore
-	columns = [c for c in unique_characters if not c in characters_to_ignore]
+	columns = np.array([c for c in unique_characters.view(
+		'U1') if not c in characters_to_ignore])
 	index = list(range(L))
 	counts_df = pd.DataFrame(data=0, columns=columns, index=index)
 
-	# Sum of the number of occurrences of each character at each position
-	for c in columns:
-		tmp_mat = (char_array == c).astype(float) * counts[:, np.newaxis]
+	# for each character, sum the number of occurrances of that character at each position
+	for c, x in zip(columns, columns.view(np.uint32)):
+		tmp_mat = (char_array == x).astype(float) * counts[:, np.newaxis]
 		counts_df.loc[:, c] = tmp_mat.sum(axis=0).T
 
 	return counts_df

@@ -3,67 +3,353 @@ import hashlib
 
 import pandas as pd
 
-
+# from anndata import AnnData
 from .utils import *
 from .cdrs import *
-from .ft import to_relative, add_feature_data, read as ft_read, query as ft_query, query_ids
+from .asvs import get_identifier
+
+
+from typing import Mapping, TYPE_CHECKING
+if TYPE_CHECKING:
+	import skbio.tree
+	import anndata
+	from .viz import ExperimentVisualizer
+	from .resynth import Cart
+
+class LibraryConfig(dotdict):
+	"""Configuration object for a given phage display library"""
+
+	"""Forward primer sequence"""
+	primer_fwd = ""
+	
+	"""Reverse primer sequence"""
+	primer_rev = ""
+
+	"""Path to reference sequence in FASTA format"""
+	reference = None
+
+	"""Nucleic acid position (0-based) indicating the first base of the first codon of the reference sequence"""
+	reference_frame_start_nt = 0
+	
+	"""Length of the reference sequence in amino acids; if the reference 
+	sequence is longer than (reference_frame_start_nt + (reference_length_aa * 3)), it will be trimmed.
+	"""
+	reference_length_aa = 0
+
+
+	"""3' (distal) end of forward read must align to this NA position or later"""
+	min_fwd_end = 0
+
+	"""3' (distal) end of reverse read must align to this NA position or earlier"""
+	max_rev_start = 0
+
+	"""Features where the aligned amino acid sequence (excluding gap characters)
+	are shorter than this length will be dropped"""
+	min_aa_length = 69
+    
+	"""Position of CDR and FR regions within the reference sequence, in amino 
+	acid space. In this object, position 0 refers to the amino acid 
+	corresponding to  :py:attr:`reference_frame_start_nt`. This object should
+	be a dict mapping domain names (e.g. 'CDR1', 'FR2', etc.) to `[start, end]`
+	positions, where `start` is inclusive and `end` is exclusive (e.g. 
+	half-open) intervals, following the Python convention.
+
+	Example::
+
+		library.CDRs = {
+			'FR1':  [0,  21],
+			'CDR1': [21, 29],
+			'FR2':  [29, 46],
+			'CDR2': [46, 54],
+			'FR3':  [54, 92],
+			'CDR3': [92, 116],
+			'FR4':  [116,127],
+		}
+
+	"""
+	CDRs = {}
+
+	"""Features with CDR or FR regions shorter than this length (in amino acids)
+	will be dropped. Dict where keys are domain names (e.g. 'CDR1', 'FR2', etc.
+	and should correspond to domains defined in :py:attr:`CDRs`) and values are 
+	minimum lengths (in amino acids)"""
+	min_CDR_length = {}
+
+
+class Config(dotdict):
+	"""Configuration object for an experiment and the accompanying snakemake workflow.
+	"""
+
+	"""Path to folder containing raw input sequences"""
+	raw_sequence_dir = ''
+
+	"""Path to scratch directory"""
+	scratch = ''
+
+	"""Phage display libraries included in this experiment. Dict where keys are
+	library names and values are :py:class:`LibraryConfig` objects."""
+	libraries: {}
+
 
 class Experiment:
-	"""Keep track of various feature tables, databases, etc."""
+	"""Track multiple feature tables in different feature spaces, feature data, databases, etc.
+	
+	After running the Snakemake pipeline for preprocessing, this class is 
+	useful for loading and organizing the results, performing common 
+	transformations (e.g. calculating enrichments), and creating visualizations.
 
-	def __init__(self, fts={}, trees={}, phenotypes=None, sql_db=None, mmseqs_dbs={}, config={}, name=None):
+
+	It is recommended to initialize this object using :py:meth:`from_files`.
+	"""
+
+	def __init__(self, fts={}, trees={}, phenotypes=None, sql_db=None, mmseqs_dbs={}, enr_models={}, config={}, name=None):
 		self._fts = {k.lower(): v for k, v in fts.items()}
 		self._trees = {k.lower(): v for k, v in trees.items()}
 		self._phenotypes = phenotypes
+
+		if phenotypes is not None:
+			_phenotype_names = self._phenotypes.index.values
+			for _space in self._fts:		
+				for _phenotype in _phenotype_names:
+					if _phenotype not in self.fts[_space].obs:
+						print(f"Warning: phenotype {_phenotype} not in obs data for feature table {_space}. Adding column of NAs")
+						self._fts[_space].obs[_phenotype] = pd.NA
+
 		self._sql_db = sql_db
 		self._mmseqs_dbs = {k.lower(): v for k, v in mmseqs_dbs.items()}
 		self._config = config
+
+		self._enr_models = enr_models
+
+
 		self.name = name
 
 	_rfts = None
+	_dfs = None
+	_rdfs = None
+	_enr = None
+	_enr_invocations = None
+	_enr_models = None
+	_references = None
+
 	_viz = None
 	_phenotype_matrix = None
 	_antigen_matrix = None
+	_selection_metadata = None
+	_cart = None
 
 	def __repr__(self):
+		import textwrap
 		out = [f"Experiment('{self.name}') with layers:"]
 
 		for k, ft in self._fts.items():
 			out.append(f"- {k:<8}: {ft.shape[0]} x {ft.shape[1]}, database: {self._mmseqs_dbs.get(k, 'None')}")
-			out.append(f"	var: {ft.var.columns.values}")
+			# out.append(f"	var: {ft.var.columns.values}")
 
-		out.append(f"	obs: {ft.obs.columns.values}")
+			out.append(
+				textwrap.fill(
+					f"var: {ft.var.columns.values}", 
+					width=80, initial_indent="  ", subsequent_indent="    ")
+			)
+			if k in self._trees:
+				out.append(f"	tree: {repr(self._trees[k])}")
+
+		# out.append(f"	obs: {ft.obs.columns.values}")
+		out.append(
+			textwrap.fill(
+				f"obs: {ft.obs.columns.values}",
+				width=80, initial_indent="  ", subsequent_indent="    ")
+		)
 		out.append(f"SQL: {self._sql_db}")
 		return "\n".join(out)
 
 	@property
-	def fts(self):
-		return dotdict(self._fts)
-
-	@property
-	def obs(self):
-		return self._fts[next(iter(self._fts))].obs
-
-	@property
-	def tree(self):
-		return dotdict(self._trees)
-
-	@property
-	def rfts(self):
-		if self._rfts is None:
-			self._rfts = {k: to_relative(v) for k,v in self._fts.items()}
-		return dotdict(self._rfts)
-
-	@property
-	def config(self):
+	def config(self) -> Config:
+		"""configuration object from `config/config.yaml`"""
 		return dict(self._config)
 
 	@property
-	def viz(self):
+	def viz(self) -> ExperimentVisualizer:
+		"""Helper to create visualizations from this Experiment"""
 		from .viz import ExperimentVisualizer
 		if self._viz is None:
 			self._viz = ExperimentVisualizer(self)
 		return self._viz
+
+	@property
+	def cart(self) -> Cart:
+		"""'Cart' of rVHHs to resynthesize"""
+		if self._cart is None:
+			from .resynth import Cart
+			self._cart = Cart(self)
+		return self._cart
+
+	@property
+	def fts(self) -> Mapping[str, anndata.AnnData]:
+		"""Count-based feature tables in each feature space. Keys are names of feature :py:attr:`spaces`."""
+		return dotdict(self._fts)
+
+	@property
+	def spaces(self):
+		"""List of feature space names in order"""
+		return list(self._fts.keys())
+
+	@property
+	def obs(self):
+		"""Sample metadata from the first feature table in :py:attr:`fts`."""
+		return self._fts[next(iter(self._fts))].obs
+
+	@property
+	def tree(self) -> Mapping[str, skbio.tree.TreeNode]:
+		"""Phylogenetic trees in each feature space. Keys are feature space names"""
+		return dotdict(self._trees)
+
+	@property
+	def rfts(self) -> Mapping[str, anndata.AnnData]:
+		"""Relative abundance feature tables in each feature space. Keys are names of feature :py:attr:`spaces`."""
+		if self._rfts is None:
+			from .ft import to_relative
+			
+			self._rfts = {k: to_relative(v) for k,v in self._fts.items()}
+		return dotdict(self._rfts)
+
+	@property
+	def dfs(self) -> Mapping[str, pd.DataFrame]:
+		"""Feature tables of counts, converted to :py:func:`.ft.fortify` - fortified :py:`pd.DataFrame`s; keys are space names"""
+		from functools import partial
+		if self._dfs is None:
+			self._dfs = lazydict({
+				k: partial(self.fortify, space=k, obs=True)
+				for k in self._fts
+			})
+		return self._dfs
+
+	@property
+	def rdfs(self):
+		"""Feature tables of relative abundances, converted to :py:func:`.ft.fortify` - fortified :py:`pd.DataFrame`s; keys are space names"""
+		from functools import partial
+		if self._rdfs is None:
+			self._rdfs = lazydict({
+				k: partial(self.fortify, space=k, relative=True, obs=True)
+				for k in self._fts
+			})
+		return self._rdfs
+
+	@property
+	def enr_models(self):
+		"""Models of enrichment probability"""
+		return dotdict(self._enr_models)
+
+	@property
+	def selection_metadata(self):
+		"""Table of metadata with one row per selection, rather than one row per-sample.
+
+		Joins the result of :func:`utils.sample_metadata_to_selection_metadata`  with :func:`utils.summarize_selection_phenotypes` 
+
+		Returns
+		-------
+		pd.DataFrame
+		"""
+		if self._selection_metadata is None:
+			_md = sample_metadata_to_selection_metadata(self.obs)
+			from .utils import summarize_selection_phenotypes
+			self._selection_metadata = _md.join(summarize_selection_phenotypes(_md, self.ag_names).rename('antigens'))
+
+		return self._selection_metadata
+
+	def _summarize_columns(self, columns, key_cols):
+		import textwrap
+		ag_names = set(self.ag_names)
+		ph_names = set(self.pheno_names)
+		key_cols = set(key_cols)
+		
+		print(textwrap.fill(
+			f"- Antigens: {sorted(ag_names)}",
+			subsequent_indent="   ",break_on_hyphens=False))
+
+		print(textwrap.fill(
+			f"- Other phenotypes: {sorted(ph_names - ag_names)}", 
+			subsequent_indent="   ",break_on_hyphens=False))
+
+		other_cols = [col for col in columns if (col not in ph_names and col not in key_cols)]
+		print(textwrap.fill(
+			f"- Other columns: {other_cols}", 
+			subsequent_indent="   ",break_on_hyphens=False))		
+
+	def summarize_selections(self):
+		"""Print a summary of selection conditions represented by this experiment"""
+		key_cols = ['expt', 'phage_library', 'selection',
+             'replicate', 'description', 'samples', 'rounds', 'antigens', 'notes']
+
+		display_or_print(self.selection_metadata[key_cols])
+		self._summarize_columns(self.selection_metadata.columns, key_cols)
+
+	def summarize_obs(self):
+		"""Print a summary of samples represented by this experiment"""
+		key_cols = ['expt', 'phage_library', 'selection',
+             'replicate', 'description', 'round', 'notes']
+
+		display_or_print(self.obs[key_cols])
+		self._summarize_columns(self.obs.columns, key_cols)
+
+	"""Calculate the probability of observing a given ``enrichment`` for some
+	starting ``abundance`` in a given feature ``space`` by applying the :func:`enr_model`"""
+	def p_enrichment(self, enrichment, abundance, space='cdr3'):
+		model = self.enr_models[space.lower()]
+		return 1 - model(np.log10(abundance), np.log10(enrichment))
+
+
+	def join_enrichment(self, space, method, relative=True):
+		enr = self.enr(space, method)
+
+
+	def fortify(self, space, **kwargs):
+		from .ft import fortify
+		return fortify(self.fts[space], **kwargs)
+
+	def enr(self, space, method=None, update=False, obs=None, *args, **kwargs):
+		"""calculate or retrieve memoized enrichment matrix
+
+		Parameters
+		----------
+		space : str
+			one of `self.spaces`
+		method : str, optional
+			enrichment calculation method accepted by `nbseq.select.enr`; 
+			if None, will use any enrichment matrix calculated for this space, otherwise `df`
+		*args : list, optional
+			Additional arguments will be passed to :func:`.select.enr`
+		**kwargs : dict, optional
+			Additional arguments will be passed to :func:`.select.enr`
+
+		Returns
+		-------
+		pd.DataFrame or anndata.Anndata
+			enrichment matrix or DataFrame
+		"""
+		from .select import enr
+		from collections import defaultdict
+
+		if self._enr is None:
+			self._enr = defaultdict(dict)
+			self._enr_invocations = defaultdict(dict)
+
+		if method is None:
+			method = 'df'
+
+		if method not in self._enr[space] or update:
+			_enr = enr(ft=self.fts[space], method=method, *args, **kwargs)
+			# self._enr_invocations[space][method] = tuple([*args, *kwargs.items()])
+
+			# if obs is not None:
+			# 	if isinstance(_enr, pd.DatFrame):
+			# 		_enr = _enr.join(obs, on='name')
+			# 	elif isinstance(_enr, AnnData):
+			# 		_enr.obs = _enr.obs.join(obs, on='name')
+					
+			self._enr[space][method] = _enr
+
+		return self._enr[space][method]
 
 	@property
 	def ag_names(self):
@@ -89,125 +375,9 @@ class Experiment:
 			self._phenotype_matrix = self.obs.loc[:,self.pheno_names]
 		return self._phenotype_matrix
 
-	@staticmethod
-	def from_files(directory='.', metadata='config/metadata-phenotypes.csv',
-		phenotypes='config/phenotypes.csv',
-		fd_cdr3='intermediate/cdr3/features/all/asvs.csv',
-		ft_aa='results/tables/aa/feature_table.biom',
-		ft_cdr3='results/tables/cdr3/feature_table.biom',
-		tree_aa='intermediate/aa/features/top_asvs/alpaca/asvs.nwk',
-		tree_cdr3='intermediate/cdr3/features/top_asvs/alpaca/asvs.nwk',
-		config='config/config.yaml',
-		sql_db='intermediate/aa/asvs.db',
-		mmseqs_db_aa='intermediate/aa/features_db/features',
-		mmseqs_db_cdr3='intermediate/cdr3/features_db/features',
-		verbose=True, **kwargs):
-
-		import yaml
-		import time
-		from datetime import timedelta
-		import humanize
-		import skbio.tree
-
-		start_time = time.time()
-
-		realdir = os.path.realpath(directory)
-		name = os.path.basename(realdir)
-
-		if verbose:
-			print(f"Loading experiment {name} from '{realdir}'...")
-			print(f"- Reading metadata from {metadata} ...")
-
-
-		metadata = read_delim_auto(Path(directory) / metadata).set_index('ID')
-
-		fd_cdr3 = Path(directory) / fd_cdr3
-		if not os.path.isfile(fd_cdr3):
-			print(f"- Warning: feature data table '{fd_cdr3}' does not exist!")
-		else:
-			if verbose: print(f"- Reading feature data for table 'cdr3' from {fd_cdr3} ...")
-			feature_data_cdr3 = read_delim_auto(fd_cdr3).drop_duplicates('CDR3ID').set_index('CDR3ID')
-
-		if not os.path.isfile(Path(directory) / phenotypes):
-			print(f"- Warning: phenotypes table '{phenotypes}' does not exist!")
-		else:
-			if verbose: print(f"- Reading phenotypes from {phenotypes} ...")
-			phenotypes = read_delim_auto(phenotypes).set_index('name', drop=True)
-
-
-		if verbose:
-			print(f"- Reading Config from {config} ...")
-		with open(config,'r') as f:
-			config = yaml.load(f,yaml.FullLoader)
-
-		sql_db_path = os.path.abspath(Path(directory) / sql_db)
-		sql_db = 'sqlite:///' + str(sql_db_path)
-		if not os.path.isfile(sql_db_path):
-			print(f"- Warning: sqlite database '{sql_db_path}' does not exist")
-		else:
-			if verbose: print(f"- Using SQL database at '{sql_db}'")
-
-		mmseqs_dbs = {
-			'aa': Path(directory) / mmseqs_db_aa,
-			'cdr3': Path(directory) / mmseqs_db_cdr3
-		}
-		for k, v in mmseqs_dbs.items():
-			if not os.path.isfile(v):
-				print(f"- Warning: mmseqs2 database '{k}' at '{v}' does not exist!")
-			elif verbose:
-				print(f"- Using mmseqs2 database '{k}' at '{v}'")
-
-		if tree_aa is not None:
-			tree_aa = Path(directory) / tree_aa
-			if verbose:
-				print(f"- Reading AA phylogeny from {tree_aa} ({humanize.naturalsize(tree_aa.stat().st_size)})...")
-			tree_aa = skbio.tree.TreeNode.read(str(tree_aa), format="newick")
-
-		if tree_cdr3 is not None:
-			tree_cdr3 = Path(directory) / tree_cdr3
-			if verbose:
-				print(f"- Reading CDR3 phylogeny from {tree_cdr3} ({humanize.naturalsize(tree_cdr3.stat().st_size)})...")
-			tree_cdr3 = skbio.tree.TreeNode.read(str(tree_cdr3), format="newick")
-
-		ft_aa = Path(directory) / ft_aa
-		if verbose:
-			print(f"- Reading AA feature table from {ft_aa} ({humanize.naturalsize(ft_aa.stat().st_size)})...")
-		ft_aa   = ft_read(ft_aa,
-			to='anndata',
-			metadata=metadata
-		)
-
-		ft_cdr3 = Path(directory) / ft_cdr3
-		if verbose:
-			print(f"- Reading CDR3 feature table from {ft_cdr3} ({humanize.naturalsize(ft_cdr3.stat().st_size)})...")
-		ft_cdr3 = ft_read(ft_cdr3,
-			to='anndata',
-			metadata=metadata,
-			feature_data=feature_data_cdr3
-		)
-		ft_cdr3 = add_feature_data(ft_cdr3, 'reads', 'nsamples')
-
-		if verbose:
-			print("Finished in " + humanize.precisedelta(timedelta(seconds=start_time-time.time())))
-
-		return Experiment(
-			fts = {
-				'aa': ft_aa,
-				'cdr3': ft_cdr3
-			},
-			trees = {
-				'aa': tree_aa,
-				'cdr3': tree_cdr3
-			},
-			phenotypes = phenotypes,
-			sql_db = sql_db,
-			mmseqs_dbs = mmseqs_dbs,
-			config = config,
-			name = name
-		)
-
-
-	def get_CDR_positions(self, library='alpaca', aa=True):
+	def get_feature_positions(self, library='alpaca', aa=True):
+		""" Get start/end position of each configured feature for the given library
+		"""
 		cdrs = self.config['libraries'][library]['CDRs']
 
 		if aa:
@@ -215,13 +385,23 @@ class Experiment:
 		else:
 			return {k: [v[0] * 3, v[1] * 3] for k,v in cdrs.items()}
 
-	def get_clonotype_positions(self, library='alpaca',aa=True):
+	def get_CDR_positions(self, library='alpaca', aa=True):
+		""" Get start/end position of each configured CDR for the given library
+		"""
+		features = self.get_feature_positions(library=library, aa=aa)
+
+		return {k:v for k, v in features.items() if k.startswith('CDR')}
+		 
+
+	def get_clonotype_positions(self, library='alpaca', aa=True):
+		"""Find the minimum and maximum position of CDR domains"""
 		cdrs = self.get_CDR_positions(library, aa)
 		start = min(v[0] for k,v in cdrs.items())
 		stop  = max(v[1] for k,v in cdrs.items())
 		return (start, stop)
 
 	def search_sql(self, **kwargs):
+		"""Execute a query against attached SQL database"""
 		from .asvs.db import search_sql
 		return search_sql(db=self._sql_db, **kwargs)
 
@@ -239,28 +419,73 @@ class Experiment:
 			space=space,
 			**kwargs)
 
-	def project(self, features, from_space='cdr3', to_space='aa', ft=True, **kwargs):
+	def project(self, features, from_space='cdr3', to_space='aa', ft=True, relative=False, query=None, **kwargs):
 		"""
-		See :py:func:`asvs.project`
+		Project between feature spaces. See :py:func:`asvs.project`
 		"""
 		from .asvs import project
 
 		if ft:
-			ft = self._fts[to_space.lower()]
+			if relative:
+				ft = self.rfts[to_space.lower()]
+			else:
+				ft = self.fts[to_space.lower()]
+			if query is not None:
+				from .ft import query as ft_query
+				ft = ft_query(ft, query, axis='obs')
 		else:
 			ft = None
 		return project(features, from_space, to_space,
-			ft=ft,
-			db=self._sql_db)
+			ft=ft, db=self._sql_db, 
+			**kwargs)
 
-	def query(self, query, axis='sample', space='cdr3', **kwargs):
-		return ft_query(self.fts[space], query, axis=axis, **kwargs)
+	def query(self, query, axis='sample', space='cdr3', relative=False, **kwargs):
+		"""Query a feature table in the given feature space; see :py:func:`ft.query`"""
+		from .ft import query as ft_query
+		if relative:
+			_ft = self.rfts[space]
+		else:
+			_ft = self.fts[space]
+		return ft_query(_ft, query, axis=axis, **kwargs)
 
 	def query_ids(self, query, axis='sample', space='cdr3', **kwargs):
+		"""Query a feature table in the given feature space; see :py:func:`ft.query` and return a list of sample or feature IDs"""
+		from .ft import query_ids
 		return query_ids(self.fts[space], query, axis=axis, **kwargs)
 
-	def find_feature(self, feature, single=False, space='cdr3'):
+	def find_feature(self, feature=None, mn=None, single=False, space='cdr3'):
+		"""locate a feature according to the first few digits of its hash identifier or the first few words of its mnemonicode
+
+		Parameters
+		----------
+		feature : str, optional
+			initial digits of the feature hash; can specify this or `mn`
+		mn : str, optional
+			initial words of feature hash converted to mnemonicode; can specify this or `feature`
+		single : bool, optional
+			if True, return only a single feature ID; raise a ValueError if multiple features match; if False, always return a list of matching feature IDs; by default False
+		space : str, optional
+			which feature space, by default 'cdr3'
+
+		Returns
+		-------
+		str or List[str]
+			matching feature IDs
+
+		Raises
+		------
+		TypeError
+			if neither `feature` nor `mn` are specified
+		ValueError
+			if `single` = True and more than one feature is found
+		"""
+		from .viz.utils import mn_to_hash
 		ft = self.fts[space.lower()]
+		if feature is None and mn is not None:
+			feature = mn_to_hash(mn)
+		elif feature is None and mn is None:
+			raise TypeError("Either `feature` or `mn` must not be None")
+
 		ids = ft[:,ft.var.index.str.startswith(feature)].var_names.values
 		if single:
 			if len(ids) > 1:
@@ -269,14 +494,323 @@ class Experiment:
 				return ids[0]
 		return ids
 
-	def find_cdr3(self, CDR3ID, single=False):
-		return self.find_feature(feature=CDR3ID, single=single, space='cdr3')
+	def find_cdr3(self, CDR3ID=None, mn=None, single=False):
+		return self.find_feature(feature=CDR3ID, mn=mn, single=single, space='cdr3')
 
 	def find_library(self, feature, space='cdr3'):
-		return self.fd(feature, fields='library', space=space)
+		return self.feature_data(feature, fields='library', space=space)
 
 	def feature_data(self, features, fields, space='cdr3'):
+		"""get feature data for this sequence"""
 		return self.fts[space.lower()].var.loc[features, fields]
+
+	def reference(self, space='cdr3', library='alpaca', aa=False):
+		"""use `.config` to locate and read the reference sequence for a given phage display ``library``"""
+		if self._references is None:
+			self._references = {}
+		space = space.lower()	
+
+		if (space, library, aa) in self._references:
+			return self._references[(space, library, aa)]
+
+		from .utils import get_reference, translate_reference
+
+		lib_config = self.config['libraries'][library]
+		reference_path = lib_config['reference']
+		reference_frame_start = lib_config['reference_frame_start_nt']
+		reference = get_reference(reference_path = reference_path, reference_frame_start = reference_frame_start)
+
+		if aa:
+			if 'suppress_amber' in lib_config:
+				suppress_amber = lib_config['lib_config']
+			else:
+				suppress_amber = True
+				
+			reference = translate_reference(reference, suppress_amber=suppress_amber)
+			if 'reference_length_aa' in lib_config:
+				reference_length = lib_config['reference_length_aa']
+				reference = reference[:reference_length]
+
+		self._references[(space, library, aa)] = reference
+		return self._references[(space, library, aa)]
+
+		
+
+
+	@staticmethod
+	def from_files(directory='.', metadata='config/metadata-phenotypes.csv',
+                phenotypes='config/phenotypes.csv',
+                config='config/config.yaml',
+                sql_db='intermediate/aa/asvs.db',
+                verbose=True, **kwargs):
+		"""Generate an Experiment object from a directory of files produced by the nbseq Snakemake pipeline
+
+		Parameters
+		----------
+		directory : str, optional
+			root directory, by default '.'
+		metadata : str, optional
+			path to sample metadata (obs), by default 'config/metadata-phenotypes.csv'
+		phenotypes : str, optional
+			path to phenotype metadata, by default 'config/phenotypes.csv'
+		config : str, optional
+			path to configuration file, by default 'config/config.yaml'
+		ft_$ : str, optional
+			path to feature table for space `$`; must be readable by :func:`ft.read`
+		fd_$ : str, optional
+			path to feature metadata for space `$`
+		tree_$ : str, optional
+			path to feature phylogeny for space `$`, in Newick (``.nwk``) format
+		mmseqs_db_$ : str, optional
+			path to mmseqs2 database for space `$`
+		enr_model_$ : str, optional
+			path to enrichment model for space `$`, to be read with :func:`.select.load_cond_ecdf`
+		sql_db : str, optional
+			path to SQLite database, by default 'intermediate/aa/asvs.db'
+		verbose : bool, optional
+			print paths to files, file size, etc. while reading; by default True
+
+		Returns
+		-------
+		_type_
+			_description_
+		"""
+
+		kwargs = {**dict(
+			fd_cdr3='intermediate/cdr3/features/all/asvs.csv',
+			ft_aa='results/tables/aa/feature_table.biom',
+			ft_cdr3='results/tables/cdr3/feature_table.biom',
+			tree_aa='intermediate/aa/features/top_asvs/alpaca/asvs.nwk',
+			tree_cdr3='intermediate/cdr3/features/top_asvs/alpaca/asvs.nwk',
+			mmseqs_db_aa='intermediate/aa/features_db/features',
+			mmseqs_db_cdr3='intermediate/cdr3/features_db/features',
+			enr_model_cdr3='results/tables/cdr3/enrichment/null/ecdf.pickle',
+		), **kwargs}
+
+
+		from .ft import read as ft_read, add_feature_data, query as ft_query, query_ids
+
+		import yaml
+		import time
+		from datetime import timedelta
+
+		def filesize(size):
+			try:
+				import humanize
+				return humanize.naturalsize(size)
+			except ImportError:
+				return str(size)
+
+		start_time = time.time()
+
+		realdir = os.path.realpath(directory)
+		name = os.path.basename(realdir)
+
+		if verbose:
+			print(f"Loading experiment {name} from '{realdir}'...")
+			print(f"- Reading metadata from {metadata} ...")
+
+		metadata = read_delim_auto(Path(directory) / metadata).set_index('ID')
+
+		if phenotypes is None:
+			print(f"- Warning: no phenotypes table given.")
+		elif not os.path.isfile(Path(directory) / phenotypes):
+			print(f"- Warning: phenotypes table '{phenotypes}' does not exist!")
+		else:
+			if verbose:
+				print(f"- Reading phenotypes from {phenotypes} ...")
+			phenotypes = read_delim_auto(phenotypes).set_index('name', drop=True)
+
+		if verbose:
+			print(f"- Reading Config from {config} ...")
+		with open(config, 'r') as f:
+			config = yaml.load(f, yaml.FullLoader)
+
+		sql_db_path = os.path.abspath(Path(directory) / sql_db)
+		sql_db = 'sqlite:///' + str(sql_db_path)
+		if not os.path.isfile(sql_db_path):
+			print(f"- Warning: sqlite database '{sql_db_path}' does not exist")
+		else:
+			if verbose:
+				print(f"- Using SQL database at '{sql_db}'")
+
+		# mmseqs_dbs = {
+		# 	k.split('mmseqs_db_',1)[-1]: Path(directory) / v
+		# 	for k, v in kwargs.items() if k.startswith('mmseqs_db_')
+		# }
+		# mmseqs_dbs = {
+		# 	'aa': Path(directory) / mmseqs_db_aa,
+		# 	'cdr3': Path(directory) / mmseqs_db_cdr3
+		# }
+		# for k, v in mmseqs_dbs.items():
+		# 	if not os.path.isfile(v):
+		# 		print(f"- Warning: mmseqs2 database '{k}' at '{v}' does not exist!")
+		# 	elif verbose:
+		# 		print(f"- Using mmseqs2 database '{k}' at '{v}'")
+
+		# feature_data_cdr3 = None
+		# if fd_cdr3 is not None:
+		# 	fd_cdr3 = Path(directory) / fd_cdr3
+		# 	if not os.path.isfile(fd_cdr3):
+		# 		print(f"- Warning: feature data table '{fd_cdr3}' does not exist!")
+		# 	else:
+		# 		if verbose:
+		# 			print(f"- Reading feature data for table 'cdr3' from {fd_cdr3} ...")
+		# 		feature_data_cdr3 = read_delim_auto(
+		# 			fd_cdr3).drop_duplicates('CDR3ID').set_index('CDR3ID')
+
+
+
+
+		# look for feature data first, since it will be used to construct feature tables
+		fd = {}
+		for k, v in kwargs.items():
+			if k.startswith('fd_'):
+				from .asvs import get_identifier
+				
+				space = k.split('fd_', 1)[-1]
+
+				if v is None:
+					print(f"- Warning: not loading feature data for space '{space}'; path was None")
+					continue
+
+				fd_path = Path(directory) / v
+				if not os.path.isfile(fd_path):
+					print(f"- Warning: feature data for table '{space}' at '{fd_path}' does not exist!")
+				else:
+					identifier = get_identifier(space)
+
+					if verbose:
+						print(f"- Reading feature data for table '{space}' from {fd_path} ({filesize(fd_path.stat().st_size)})...")
+					fd[space] = read_delim_auto(
+						fd_path).drop_duplicates(identifier).set_index(identifier)
+
+
+		trees = {}
+		fts = {}
+		mmseqs_dbs = {}
+		enr_models = {}
+		
+
+		for k, v in kwargs.items():
+			if v is not None:
+
+				if k.startswith('mmseqs_db_'):
+					space = k.split('mmseqs_db_', 1)[-1]
+					mmseqs_db_path = Path(directory) / v
+					if not os.path.isfile(mmseqs_db_path):
+						print(f"- Warning: mmseqs2 database for space '{space}' at '{mmseqs_db_path}' does not exist!")
+					else:
+						if verbose:
+							print(f"- Using mmseqs2 database '{space}' at '{mmseqs_db_path}'")
+						mmseqs_dbs[space] = str(mmseqs_db_path)
+
+				elif k.startswith('tree_'):
+					space = k.split('tree_', 1)[-1]
+
+					tree_path = Path(directory) / v
+					if not os.path.isfile(tree_path):
+						print(
+							f"- Warning: phylogeny for space '{space}' at '{tree_path}' does not exist!")
+					else:
+						import skbio.tree
+
+						if verbose:
+							print(
+								f"- Reading {space} phylogeny from {tree_path} ({filesize(tree_path.stat().st_size)})...")
+						trees[space] = skbio.tree.TreeNode.read(str(tree_path), format="newick")
+
+				# feature tables
+				elif k.startswith('ft_'):
+					space = k.split('ft_', 1)[-1]
+
+					ft_path = Path(directory) / v
+					if verbose:
+						print(
+							f"- Reading {space} feature table from {ft_path} ({filesize(ft_path.stat().st_size)})...")
+					fts[space] = ft_read(ft_path,
+							to='anndata',
+							metadata=metadata,
+							feature_data=(fd[space] if space in fd else None)
+					)
+					fts[space] = add_feature_data(fts[space], 'reads', 'nsamples')
+
+				# enrichment ecdf
+				elif k.startswith('enr_model_'):
+					space = k.split('enr_model_', 1)[-1]
+
+					ecdf_path = Path(directory) / v
+					from .select import load_cond_ecdf
+
+					if not os.path.isfile(ecdf_path):
+						print(f"- Warning: enrichment model for space '{space}' at '{ecdf_path}' does not exist!")
+					else:
+						if verbose:
+							print(
+								f"- Reading enrichment model (conditional ECDF) for space {space} from {ecdf_path} ({filesize(ecdf_path.stat().st_size)})...")
+						enr_models[space] = load_cond_ecdf(ecdf_path)
+
+		# if tree_aa is not None:
+		# 	tree_aa = Path(directory) / tree_aa
+		# 	if verbose:
+		# 		print(
+		# 			f"- Reading AA phylogeny from {tree_aa} ({filesize(tree_aa.stat().st_size)})...")
+		# 	trees['aa'] = skbio.tree.TreeNode.read(str(tree_aa), format="newick")
+
+		# if tree_cdr3 is not None:
+		# 	tree_cdr3 = Path(directory) / tree_cdr3
+		# 	if verbose:
+		# 		print(
+		# 			f"- Reading CDR3 phylogeny from {tree_cdr3} ({filesize(tree_cdr3.stat().st_size)})...")
+		# 	trees['cdr3'] = skbio.tree.TreeNode.read(str(tree_cdr3), format="newick")
+
+		# fts = {}
+		# if ft_aa is not None:
+		# 	ft_aa = Path(directory) / ft_aa
+		# 	if verbose:
+		# 		print(
+		# 			f"- Reading AA feature table from {ft_aa} ({filesize(ft_aa.stat().st_size)})...")
+		# 	ft_aa = ft_read(ft_aa,
+        #                     to='anndata',
+        #                     metadata=metadata
+        #            )
+		# 	fts['aa'] = ft_aa
+
+		# if ft_cdr3 is not None:
+		# 	ft_cdr3 = Path(directory) / ft_cdr3
+		# 	if verbose:
+		# 		print(
+		# 			f"- Reading CDR3 feature table from {ft_cdr3} ({filesize(ft_cdr3.stat().st_size)})...")
+		# 	ft_cdr3 = ft_read(ft_cdr3,
+        #                     to='anndata',
+        #                     metadata=metadata,
+        #                     feature_data=feature_data_cdr3
+        #              )
+		# 	ft_cdr3 = add_feature_data(ft_cdr3, 'reads', 'nsamples')
+		# 	fts['cdr3'] = ft_cdr3
+
+		if verbose:
+			try:
+				import humanize
+				print("Finished in " +
+	  				humanize.precisedelta(timedelta(seconds=start_time-time.time())))
+			except ImportError:
+				print(f"Finished at {time.time()}")
+
+		return Experiment(
+			fts=fts,
+			trees=trees,
+			phenotypes=phenotypes,
+			sql_db=sql_db,
+			mmseqs_dbs=mmseqs_dbs,
+			enr_models=enr_models,
+			config=config,
+			name=name
+		)
+	
+
+
+
 
 def translate_sam_alignment_paired(samfile_path=None,
 	reference=None, reference_path=None, reference_frame_start=0,

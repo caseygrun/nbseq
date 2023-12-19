@@ -1,4 +1,6 @@
 import microplates.plot as mp_plot
+from IPython.display import display
+import matplotlib.pyplot as plt
 
 def get_samples_to_repeat(samples, gel,
                           repeat_if_status=['bad','?'], repeat_plates=None,

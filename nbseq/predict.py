@@ -61,58 +61,58 @@ class LeavePairOut(LeavePOut):
 import sklearn.metrics
 
 # Monkey patch the plot method of RocCurveDisplay to prevent it from trying to show the legend when empty (and thus generating lots of unsuppressable warning messages from matplotlib
+# Not needed as of sklearn 1.3.0
+# def _RocCurveDisplay_plot(self, ax=None, *, name=None, **kwargs):
+# 	"""Plot visualization
+# 	Extra keyword arguments will be passed to matplotlib's ``plot``.
+# 	Parameters
+# 	----------
+# 	ax : matplotlib axes, default=None
+# 		Axes object to plot on. If `None`, a new figure and axes is
+# 		created.
+# 	name : str, default=None
+# 		Name of ROC Curve for labeling. If `None`, use `estimator_name` if
+# 		not `None`, otherwise no labeling is shown.
+# 	Returns
+# 	-------
+# 	display : :class:`~sklearn.metrics.plot.RocCurveDisplay`
+# 		Object that stores computed values.
+# 	"""
 
-def _RocCurveDisplay_plot(self, ax=None, *, name=None, **kwargs):
-	"""Plot visualization
-	Extra keyword arguments will be passed to matplotlib's ``plot``.
-	Parameters
-	----------
-	ax : matplotlib axes, default=None
-		Axes object to plot on. If `None`, a new figure and axes is
-		created.
-	name : str, default=None
-		Name of ROC Curve for labeling. If `None`, use `estimator_name` if
-		not `None`, otherwise no labeling is shown.
-	Returns
-	-------
-	display : :class:`~sklearn.metrics.plot.RocCurveDisplay`
-		Object that stores computed values.
-	"""
+# 	name = self.estimator_name if name is None else name
 
-	name = self.estimator_name if name is None else name
+# 	line_kwargs = {}
+# 	if self.roc_auc is not None and name is not None:
+# 		line_kwargs["label"] = f"{name} (AUC = {self.roc_auc:0.2f})"
+# 	elif self.roc_auc is not None:
+# 		line_kwargs["label"] = f"AUC = {self.roc_auc:0.2f}"
+# 	elif name is not None:
+# 		line_kwargs["label"] = name
 
-	line_kwargs = {}
-	if self.roc_auc is not None and name is not None:
-		line_kwargs["label"] = f"{name} (AUC = {self.roc_auc:0.2f})"
-	elif self.roc_auc is not None:
-		line_kwargs["label"] = f"AUC = {self.roc_auc:0.2f}"
-	elif name is not None:
-		line_kwargs["label"] = name
+# 	line_kwargs.update(**kwargs)
 
-	line_kwargs.update(**kwargs)
+# 	import matplotlib.pyplot as plt
 
-	import matplotlib.pyplot as plt
+# 	if ax is None:
+# 		fig, ax = plt.subplots()
 
-	if ax is None:
-		fig, ax = plt.subplots()
+# 	(self.line_,) = ax.plot(self.fpr, self.tpr, **line_kwargs)
+# 	info_pos_label = (
+# 		f" (Positive label: {self.pos_label})" if self.pos_label is not None else ""
+# 	)
 
-	(self.line_,) = ax.plot(self.fpr, self.tpr, **line_kwargs)
-	info_pos_label = (
-		f" (Positive label: {self.pos_label})" if self.pos_label is not None else ""
-	)
+# 	xlabel = "False Positive Rate" + info_pos_label
+# 	ylabel = "True Positive Rate" + info_pos_label
+# 	ax.set(xlabel=xlabel, ylabel=ylabel)
 
-	xlabel = "False Positive Rate" + info_pos_label
-	ylabel = "True Positive Rate" + info_pos_label
-	ax.set(xlabel=xlabel, ylabel=ylabel)
+# 	if "label" in line_kwargs and (len(line_kwargs['label']) > 0) and (line_kwargs['label'][0] != '_'):
+# 		ax.legend(loc="lower right")
 
-	if "label" in line_kwargs and (len(line_kwargs['label']) > 0) and (line_kwargs['label'][0] != '_'):
-		ax.legend(loc="lower right")
+# 	self.ax_ = ax
+# 	self.figure_ = ax.figure
+# 	return self
 
-	self.ax_ = ax
-	self.figure_ = ax.figure
-	return self
-
-sklearn.metrics.RocCurveDisplay.plot = _RocCurveDisplay_plot
+# sklearn.metrics.RocCurveDisplay.plot = _RocCurveDisplay_plot
 
 
 def plot_cv_indices(cv, X, y, group=None, ax=None, cmap_data = plt.cm.Paired, cmap_cv = plt.cm.coolwarm, lw = 10):
@@ -145,7 +145,7 @@ def plot_cv_indices(cv, X, y, group=None, ax=None, cmap_data = plt.cm.Paired, cm
         )
         pos = sum(y[tr])
         neg = len(y[tr])-pos
-
+        
         ax.text(x=n_y, y=ii+0.5, s=f"{pos}+ / {neg}-")
 
     # Plot the data classes and groups at the end
@@ -332,7 +332,7 @@ def list_of_records_to_dict_of_arrays(records, len_indicator, index=None):
 	"""
 	columns = list(records[0].keys())
 	n_rows = sum(len(rec[len_indicator]) for rec in records)
-
+	
 	result = { c: np.zeros(shape=(n_rows,), dtype=records[0][c].dtype if hasattr(records[0][c], 'dtype') else 'object') for c in columns }
 	if index is not None:
 		if not hasattr(records[0][index], 'index'):
@@ -345,7 +345,13 @@ def list_of_records_to_dict_of_arrays(records, len_indicator, index=None):
 		record_len = len(record[len_indicator])
 		for c in record.keys():
 			v = record[c]
-			result[c][i:i+record_len] = v
+			# if hasattr(v, '__len__'):
+			# 	if len(v) != record_len:
+			# 		result[c][i:i+record_len] = (v,)
+			try:
+				result[c][i:i+record_len] = v
+			except ValueError:
+				result[c][i:i+record_len] = (v,)
 
 		if index:
 			result['index'][i:i+record_len] = record[index].index
@@ -407,10 +413,13 @@ def plot_hyperparam_grid(search, param_grid, limit_x=None, df=None, ax=None):
 	return ax
 
 def plot_hyperparam_progress(summary, ax=None):
-	if ax is None:
-		fig, ax = plt.subplots()
-	ax.errorbar(summary['new_params'].apply(str), summary['mean_test_score'], yerr=summary['std_test_score'])
-	ax.set_xticklabels(summary['new_params'].apply(str), rotation=-45, horizontalalignment='left');
+    if ax is None:
+        fig, ax = plt.subplots()
+    x_labels = summary['new_params'].apply(pprint_dict)
+    xs = range(len(x_labels))
+    ax.errorbar(xs, summary['mean_test_score'], yerr=summary['std_test_score'])
+    ax.set_xticks(xs)
+    ax.set_xticklabels(x_labels, rotation=-45, horizontalalignment='left');
 
 
 from collections import namedtuple

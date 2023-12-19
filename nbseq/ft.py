@@ -6,8 +6,9 @@ import numpy as np
 import pandas as pd
 import biom
 from anndata import AnnData
+import anndata
 
-from .utils import map_generic
+from .utils import map_generic, sparse_var
 
 
 def read_sparse_dir(directory):
@@ -132,7 +133,8 @@ def read(path, to='anndata', format=None, metadata=None, feature_data=None, **kw
 def to_biom(ft):
 	import biom
 
-	return biom.Table(data=ft.X, observation_ids = ft.var_names.values, sample_ids = ft.obs_names.values)
+	# in anndata, rows are samples, columns are variables; in biom, it's the transpose
+	return biom.Table(data=ft.X.T, observation_ids = ft.var_names.values, sample_ids = ft.obs_names.values)
 
 
 def to_anndata(ft, metadata=None, feature_data=None, obs=None, var=None, **kwargs):
@@ -250,10 +252,16 @@ def sum(ft, axis='sample', **kwargs):
 
 @sum.register(AnnData)
 def _ft_sum_ad(ft_ad, axis='sample'):
+	from scipy.sparse import isspmatrix
+
 	axis = get_axis(axis, numeric=True)
 
 	# ids = ft_ad.obs_names if axis else ft_ad.var_names
-	X_sum = ft_ad.X.sum(axis=axis).A1
+	if isspmatrix(ft_ad.X):
+		X_sum = ft_ad.X.sum(axis=axis).A1
+	else:
+		X_sum = ft_ad.X.sum(axis=axis)
+	
 	# return pd.Series(X_sum, index = ids)
 	return pd.Series(X_sum, index=get_ids_ad(ft_ad, axis=(1 - axis)))
 
@@ -266,6 +274,14 @@ ft_sum = sum
 
 # * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
+def get_identifier(ft, axis='var'):
+	if axis != 'var':
+		raise NotImplementedError()
+	identifier = ft.var_names.name
+	if identifier is None:
+		return 'feature'
+	else:
+		return identifier
 
 def get_ids_ad(ft, axis):
 	return (ft.obs_names if get_axis(axis, True) else ft.var_names).values
@@ -485,18 +501,22 @@ def filter_feature_table(ft, ids, axis='observation'):
 def filter_ids_min_abundance_prevalence(ft, min_abundance=2, min_prevalence=1, axis='feature'):
 	if isinstance(ft,biom.Table):
 		axis = get_axis_biom(axis, numeric=True)
-		n_items_with_min_abundance = (ft.matrix_data > min_abundance).sum(axis=axis)
+		n_items_with_min_abundance = (ft.matrix_data > min_abundance).sum(axis=(not axis))
+		indices_to_keep = np.asarray(n_items_with_min_abundance > min_prevalence).squeeze()
+		ids_to_keep = get_ids(ft, axis)[indices_to_keep]
+
 	elif isinstance(ft,AnnData):
 		axis = get_axis(axis, numeric=True)
 		n_items_with_min_abundance = (ft.X > min_abundance).sum(axis=axis)
+
+		# .sum above may return a numpy.matrix; make sure it is an ndarray, then
+		# reduce to 1 dimension with squeeze
+		indices_to_keep = np.asarray(n_items_with_min_abundance > min_prevalence).squeeze()
+		ids_to_keep = get_ids(ft, not axis)[indices_to_keep]
+
 	else:
 		raise ValueError(f"ft must be biom.Table or AnnData: do not know how to filter {repr(ft)}")
-
-	# .sum above may return a numpy.matrix; make sure it is an ndarray, then
-	# reduce to 1 dimension with squeeze
-	indices_to_keep = np.asarray(n_items_with_min_abundance > min_prevalence).squeeze()
-	ids_to_keep = get_ids(ft, not axis)[indices_to_keep]
-
+	
 	return ids_to_keep
 
 def filter_abundance_prevalence(ft, min_abundance=2, min_prevalence=1, axis='feature'):
@@ -741,10 +761,7 @@ def fortify_ad(ft, sample_col=None, feature_col=None, abundance_col='abundance',
 		if sample_col is None:
 			sample_col = 'sample'
 	if feature_col is None:
-		feature_col = ft.var_names.name
-		if feature_col is None:
-			feature_col = 'feature'
-
+		feature_col = get_identifier(ft, axis='var')
 
 	df = pd.DataFrame({
 		sample_col: sample_ids[coo.row],
@@ -770,8 +787,57 @@ fortify_anndata = fortify_ad
 
 
 
+def collapse_top_asvs(ft_ad, samples, n=20, top_from_samples=None, relative=False, other_features=None):
 
+	if top_from_samples is None:
+		top_from_samples = samples
 
+	ft2 = ft_ad[top_from_samples,:]
+
+	asv_counts = ft_sum(ft2, axis='var').sort_values(ascending=False)
+	top_asvs = asv_counts.iloc[0:n].index.values
+
+	if relative:
+		ft_ad = to_relative(ft_ad)
+
+	if other_features is not None:
+		top_asvs = np.union1d(top_asvs, other_features)
+
+	ft_samples = ft_ad[samples,:]
+	ft_top = ft_samples[:,top_asvs]
+
+	# sum top ASVs for each sample
+	ft_top_sum = ft_top.X.sum(axis=1)
+
+	# sum all ASVs for each sample
+	ft_samples_sum = ft_samples.X.sum(axis=1)
+
+	# calculate sum of all non-top ASVs for each sample
+	# interestingly, much faster to get sum of non-top-ASVs by summing everything,
+	# then summing top ASVs and subtracting, as opposed to summing non-top-ASVs...
+	# the below options are ~10x slower
+	#     other_sum = fts[:,other_asvs.index.values].X.sum(axis=1)
+	#     other_sum = ft_sum(fts[:,other_asvs.index.values])
+	other_asv_sum = ft_samples_sum - ft_top_sum
+
+	ft_other = AnnData(
+	   other_asv_sum,
+	   obs=pd.DataFrame(index=ft_samples.obs_names),
+	   var=pd.DataFrame(index=['others'])
+	)
+	return anndata.concat([ft_top, ft_other], axis=1, merge="first")
+
+def fortify_top_asvs(ft, query, n=30, select_from_round=4,other_features=None):
+
+	samples = query_ids(ft, f"({query}) & kind =='+' & io == 'i'", axis='obs')
+	if select_from_round is not None:
+		top_from_samples = query_ids(ft, f"({query}) & r == {select_from_round} & kind =='+' & io == 'i'", axis='obs')
+	else:
+		top_from_samples = None
+	
+	ft_top = collapse_top_asvs(ft, samples, top_from_samples= top_from_samples, n=n, other_features=other_features)
+	df = fortify(ft_top, obs=True, relative=True)
+	return df
 
 @singledispatch
 def drop_empty(ft, axis='samples'):
@@ -793,6 +859,38 @@ def drop_empty_ad(ft, axis='obs'):
 	ids_to_keep = get_ids_ad(ft,axis)[ft_sum(ft,axis=axis) > 0]
 	return filter(ft,ids_to_keep, axis=axis)
 
+
+def drop_zero_var(ft, axis='obs'):
+	"""return feature table where zero-variance observations or variables are dropped
+
+	Parameters
+	----------
+	ft : anndata.AnnData
+		feature table
+	axis : str, optional
+		drop entries from which axis; if None, drop zero-variance variables, then zero-variance observations; by default 'obs'
+
+	Returns
+	-------
+	anndata.AnnData
+		filtered feature table
+	"""
+	if axis is None:
+		obs_variance = sparse_var(ft.X, axis=0)
+		var_variance = sparse_var(ft.X, axis=1)
+		return ft[obs_variance > 0, var_variance > 0]
+	else:
+		axis = get_axis(axis, numeric=True)
+		axis_variance = sparse_var(ft.X, axis=axis)
+		return slice_ft(ft, axis_variance > 0, axis=axis)
+	
+
+def slice_ft(ft, _slice, axis):
+	axis = get_axis(axis)
+	if axis == 'obs':
+		return ft[_slice, :]
+	elif axis == 'var':
+		return ft[:, _slice]
 
 
 def get_ids_where_nz(ft, axis):
@@ -866,14 +964,15 @@ def get_axis_biom(name, numeric=False):
 		'observation':'observation',
 		'sample':'sample',
 		'feature':'observation',
-		0: 'sample',
-		1: 'observation'
+		# biom uses rows = features, columns = samples 
+		1: 'sample',
+		0: 'observation'
 	}[name]
 
 	if numeric:
 		return {
-			'sample':0,
-			'observation':1
+			'sample':1,
+			'observation':0
 		}[name]
 	else:
 		return name
@@ -921,8 +1020,12 @@ def join_metadata(ft, data, axis, index=True, how='left', **kwargs):
 	axis = get_axis(axis)
 	if axis == 'var':
 		ft.var = pd.merge(left=ft.var, right=data, **{'left_index':index, 'right_index':index, 'how':'left', **kwargs})
+		if ft.var.index.name is None and data.index.name is not None:
+			ft.var.index.name = data.index.name
 	elif axis == 'obs':
 		ft.obs = pd.merge(left=ft.obs, right=data, **{'left_index':index, 'right_index':index, 'how':'left', **kwargs})
+		if ft.obs.index.name is None and data.index.name is not None:
+			ft.obs.index.name = data.index.name
 	return ft
 
 
@@ -941,9 +1044,12 @@ def _query_ids_ad(ad, query, axis='sample', **kwargs):
 def query_ad(ad, query, axis='obs'):
 	axis = get_axis(axis)
 	if axis == 'obs':
-		return ad[_query_ids_ad(ad, query, axis='obs'),:]
+		out = ad[_query_ids_ad(ad, query, axis='obs'),:]
+		out.var_names.name = ad.var_names.name
 	elif axis == 'var':
-		return ad[:,_query_ids_ad(ad, query, axis='var')]
+		out = ad[:,_query_ids_ad(ad, query, axis='var')]
+		out.var_names.name = ad.var_names.name
+	return out
 
 def query(ft, query, axis, **kwargs):
 	return dispatch(ft, {

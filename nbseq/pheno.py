@@ -8,7 +8,7 @@ from .ft import (
     transform as ft_transform,
     query as ft_query,
 )
-
+from .utils import sample_metadata_to_selection_metadata
 
 
 def compare_binary_phenotypes(ft, phenotypes, pos_query=None, neg_query=None, n_boots=100):
@@ -224,10 +224,124 @@ def summarize_phenotypes(metadata, phenotypes):
     return summary
 
 
-def selection_phenotype_grid(metadata, phenotypes):
-    selections = metadata.groupby('selection').first()
+def list_phenotypes(metadata, phenotypes):
+    from IPython.display import Markdown
 
-    grid = selections.set_index(['sample','genotype_pair']).loc[:,phenotypes.name]
+    summary = pd.DataFrame(index=phenotypes.name, columns=[
+                           'selections', 'rounds', 'pos', 'neg'])
+
+    metadata = metadata.copy()
+
+    metadata.loc[metadata['expt'] == '027i.lib','description'] = metadata.loc[metadata['expt'] == '027i.lib', 'sample']
+    metadata['description'] = metadata['description'] + \
+        metadata['cond_S'].apply(lambda x: f" ({x})" if not pd.isna(x) else "")
+    with pd.option_context('display.max_colwidth', None, 'display.max_rows', None, 'display.colheader_justify', 'left'):
+
+        for phenotype in phenotypes.name:
+
+            phenotype_not_na = ~metadata.loc[:, phenotype].isna()
+            n_selections = metadata.loc[phenotype_not_na,
+                                        'selection'].nunique()
+            n_rounds = phenotype_not_na.sum()
+
+            summary.loc[phenotype, 'selections'] = n_selections
+            summary.loc[phenotype, 'rounds'] = n_rounds
+
+            # print(f"{phenotype}: {summary.loc[phenotype,'selections']} selections / {summary.loc[phenotype,'rounds']} selection-rounds")
+
+            pos = metadata.query(
+                f"(`{phenotype}` == `{phenotype}`) & `{phenotype}` == 1")
+            n_pos = pos['selection'].nunique()
+            neg = metadata.query(
+                f"(`{phenotype}` == `{phenotype}`) & `{phenotype}` != 1")
+            n_neg = neg['selection'].nunique()
+
+            display(Markdown(f"## {phenotype}: \n"
+                             f"{n_selections} selections /"
+                             f"{n_rounds} rounds"
+                             ))
+
+            display(
+                Markdown(f'### {phenotype}<sup>+</sup> ({n_pos} selections)'))
+            display(Markdown(
+                pos.groupby('selection')[['description', 'cond_notes']].first().rename(columns={'description': 'Strain pair', 'cond_notes': 'Notes'}).to_markdown())
+            )
+            # .style.set_properties(**{'text-align': 'left'}))
+
+            display(
+                Markdown(f'### {phenotype}<sup>-/0</sup> ({n_neg} selections)'))
+            display(Markdown(
+                neg.groupby('selection')[['description', 'cond_notes']].first().rename(columns={'description': 'Strain pair', 'cond_notes': 'Notes'}).to_markdown())
+            )
+            # .style.set_properties(**{'text-align': 'left'}))
+
+            # summary.loc[phenotype,'pos'] = list(metadata.query(f"`{phenotype}` == 1").groupby('selection')['description'].first())
+            # summary.loc[phenotype,'neg'] = list(metadata.query(f"`{phenotype}` == -1").groupby('selection')['description'].first())
+
+            # print(f"+ {pos:<4} {summary.loc[phenotype,'pos']}")
+            # print(f"- {neg:<4} {summary.loc[phenotype,'neg']}")
+            # print(f"- {neg:<4}" + str(list(metadata.query(f"`{phenotype}` == -1").groupby('selection')['genotype_pair'].first())))
+            # print()
+    return summary
+
+
+def plot_ag_matrix(matrices, metadata, kws=None, labels=None, ax=None, figsize=None):
+    from .viz.utils import trunc_ellipsis
+    import matplotlib.pyplot as plt
+    
+    ag_matrix = matrices[0]
+    descriptions = metadata.reindex(ag_matrix.index)['description'].apply(trunc_ellipsis()).to_frame()
+    descriptions['x'] = range(len(descriptions))
+    # descriptions
+
+
+    if ax is None:
+        if figsize is None:
+            figsize = (0.05*ag_matrix.shape[0], 0.1*ag_matrix.shape[1])
+        fig, ax = plt.subplots(figsize=figsize)
+
+    if kws is None:
+        kws = [{}] * len(matrices)
+    if labels is None:
+        labels = [None]*len(matrices)
+
+    ax.grid(True)
+    ax.set_axisbelow(True)
+    for ag_matrix, kwargs, label in zip(matrices, kws, labels):
+        df = ag_matrix.reset_index().melt(id_vars='name', var_name='antigen')
+
+        names = ag_matrix.index.values
+        pos = df.query('value == 1')
+        neg = df[(~df['value'].isna()) & (df['value'] != 1)]
+
+        # ax.scatter(descriptions.loc[df['name'],'x'], df['antigen'], c=df['value'])
+        ax.scatter(descriptions.loc[pos['name'], 'x'], pos['antigen'],
+                   label=f'{label}+' if label is not None else '+', color='tab:orange', **kwargs)
+        ax.scatter(descriptions.loc[neg['name'], 'x'], neg['antigen'],
+                   label=f'{label}-' if label is not None else '-', color='tab:blue', **kwargs)
+
+    ax.set_xticks(descriptions.x, descriptions.description, rotation=-90)
+    ax.legend()
+
+# fig, ax = plt.subplots(figsize=(30,20))
+# plot_ag_matrix([ag_matrix], [dict(s=100, alpha=0.2)], ax=ax)
+
+
+
+def plot_selection_phenotype_grid(ft, selection_metadata=None, phenotypes=None, features=None):
+    pass
+
+def selection_phenotype_grid(metadata, phenotypes, row_labels=['name','description']):
+    from natsort import natsort_keygen
+    
+    selections = sample_metadata_to_selection_metadata(metadata).reset_index() #metadata.groupby('selection').first()
+
+    selections = selections.sort_values(
+        by=row_labels,
+        key=natsort_keygen()
+    )
+
+    grid = selections.set_index(row_labels).loc[:, phenotypes.name]
 
     grid.columns = pd.MultiIndex.from_frame(
         phenotypes.set_index('name').loc[grid.columns,['category']].reset_index().rename(columns={'index':'phenotype'})[['category','phenotype']]
@@ -300,6 +414,8 @@ def selection_phenotype_grid(metadata, phenotypes):
     return grid_style.set_table_styles(styles)
 
 def plot_antigen_label_balance(ag_matrix, orient='h', ax=None):
+    import matplotlib.pyplot as plt
+    
     control_locs = ag_matrix.index.str.startswith('control_')
     n_controls = control_locs.sum()
     labels = ag_matrix.loc[~control_locs,:]

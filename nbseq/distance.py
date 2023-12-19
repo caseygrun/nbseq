@@ -3,6 +3,7 @@
 # compute edit distance between each pair
 
 from .utils import *
+from pathlib import Path
 import numpy as np
 
 from skbio import DistanceMatrix
@@ -35,7 +36,7 @@ def jaccard(a,b):
 	intersect = len(np.intersect1d(a.indices, b.indices))
 	union = len(np.union1d(a.indices, b.indices))
 	# prevent divide by zero
-	return 1 - np.float(intersect)/max(np.float(union),1)
+	return 1 - np.double(intersect)/max(np.double(union),1)
 
 def braycurtis(a,b):
 	'''
@@ -139,22 +140,51 @@ def pairwise_distance(ft, metric='braycurtis', axis='sample', threads='auto', **
 
 	return DistanceMatrix(dist, ids=ft.ids('sample'))
 
-def pairwise_distance_phylo(ft_path, tree_path, outfile=None, metric='weighted_unifrac', **kwargs):
+def pairwise_distance_phylo(ft_path, tree_path, outfile=None, metric='weighted_unifrac', 
+	intersection=True, 
+	verbose=True, **kwargs):
+
+	import tempfile
 	import unifrac
+	import skbio.tree
+	from .ft import read_biom, write_biom
 
-	if not metric in phylogenetic_metrics:
-		raise NotImplementedError(f"{metric} not implemented.")
 
-	if metric == 'unweighted_unifrac':
-		dist = unifrac.unweighted(table = ft_path,
-			phylogeny = tree_path, **kwargs)
-		# dist = unifrac.unweighted_to_file(table = ft_path,
-		# 	phylogeny = tree_path, out_filename = outfile, **kwargs)
-	elif metric == 'weighted_unifrac':
-		# dist = unifrac.weighted_normalized_to_file(table = ft_path,
-		# 	phylogeny = tree_path, out_filename = outfile, **kwargs)
-		dist = unifrac.weighted_normalized(table = ft_path,
-			phylogeny = tree_path, **kwargs)
+	with tempfile.TemporaryDirectory() as tmpdirname:
+
+		if not metric in phylogenetic_metrics:
+			raise NotImplementedError(f"{metric} not implemented.")
+
+		if intersection:
+			print("Calculating intersection of tree labels and feature table variable names...")
+			ft = read_biom(str(ft_path))
+			tree = skbio.tree.TreeNode.read(str(tree_path), format="newick")
+			if verbose:
+				print("Before filtering:")
+				print(f"Feature table: {repr(ft)}")
+				print(f"Tree: {tree.count(tips=True)} tips")
+			
+			features = set(ft.ids('observation')).intersection(tip.name for tip in tree.tips())
+			ft.filter(features, axis='observation', inplace=True)
+			ft_path = str(Path(tmpdirname) / 'ft.biom')
+			
+			if verbose:
+				print("After filtering:")
+				print(f"Feature table: {repr(ft)}")
+				print(f"Saving feature table to temporary file {ft_path}")
+
+			write_biom(ft, ft_path)
+
+		if metric == 'unweighted_unifrac':
+			dist = unifrac.unweighted(table = ft_path,
+				phylogeny = tree_path, **kwargs)
+			# dist = unifrac.unweighted_to_file(table = ft_path,
+			# 	phylogeny = tree_path, out_filename = outfile, **kwargs)
+		elif metric == 'weighted_unifrac':
+			# dist = unifrac.weighted_normalized_to_file(table = ft_path,
+			# 	phylogeny = tree_path, out_filename = outfile, **kwargs)
+			dist = unifrac.weighted_normalized(table = ft_path,
+				phylogeny = tree_path, **kwargs)
 
 	if outfile is not None:
 		dist.write(outfile)

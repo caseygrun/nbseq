@@ -5,10 +5,10 @@ import colorsys
 from .utils import *
 
 
-def cdr3_tag(CDR3ID,ft=None):
+def cdr3_tag(CDR3ID,ex,ft=None):
 	from nbseq.viz.asv import hash_to_color, contrasting_color, pretty_hex
-	from IPython.display import HTML
-	cdr3id = find_cdr3(CDR3ID, single=True)
+	from IPython.display import HTML, display
+	cdr3id = ex.find_cdr3(CDR3ID, single=True)
 	bg = hash_to_color(cdr3id)
 	fg = contrasting_color(bg)
 	if ft is not None:
@@ -18,13 +18,71 @@ def cdr3_tag(CDR3ID,ft=None):
 	display(HTML(f"<span style='background-color:{bg};color:{fg};padding:0.3em;'>{pretty_hex(cdr3id)}</span><small style='font-size:8pt;'><code>{cdr3id}</code> ({library})</small>"))
 
 
+def top_selections_table(feature, df_enr, space='cdr3', rounds=None, alpha=0.01, min_enrichment=3):
+	import numpy as np
+	from ..asvs import get_identifier
+	from .utils import hash_to_mn_short
+
+	identifier = get_identifier(space)
+	df = df_enr.query(f"{identifier} == '{feature}'")
+	table = df
+
+	if rounds is None:
+		rounds = sorted(
+			list(df.columns[df.columns.str.startswith('R')]))
+	
+	cols = ['name']
+	if 'desc_short' in df.columns:
+		cols.append('desc_short')
+	elif 'description' in df.columns:
+		cols.append('description')
+	for col in ['antigens', 'enrichment', 'start','end','p_value']:
+		if col in df.columns:
+			cols.append(col)
+	table = df[cols]
+
+
+	mn = hash_to_mn_short(feature)
+	title = f"{space.upper()} {feature} ({mn}): top selections"
+	rows = np.array([False])
+	conditions = []
+	if alpha is not None:
+		rows = (table.p_value < alpha) | rows
+		# table = table[table.p_value < alpha]
+		conditions.append(f"(p < {alpha})")
+	if min_enrichment is not None:
+		rows = (table.enrichment > min_enrichment) | rows
+		# table = table[table.enrichment > min_enrichment]
+		conditions.append(f"(enrichment > {min_enrichment})")
+	if len(rows) > 1 or all(rows):
+		table = table[rows]
+	if len(conditions) > 0:
+		title += f" where {' and '.join(conditions)}"
+
+	table = table.sort_values(['p_value','enrichment'], ascending=[True,False])
+	if 'p_value' in cols:
+		table['stars'] = table['p_value'].apply(stars)
+
+
+	tf = table.style.format({
+		'enrichment': '{:.2g}',
+		'start':'{:.2g}',
+		'end':'{:.2g}',
+		'p_value':'{:.2g}'
+	})
+	tf.set_caption(title)
+	return tf
+	# return table
+
+
 def top_samples_table(features, ft=None, fd=None, relative=False, index=['feature','method','description','round','replicate','sample']):
 	import pandas as pd, numpy as np
 	from ..utils import intersection_ordered
+	from ..ft import fortify, to_relative
 
 	if relative:
 		if ft is not None:
-			ft = nbseq.ft.to_relative(ft)
+			ft = to_relative(ft)
 		max_abundance = 1
 	else:
 		if ft is not None:
@@ -32,13 +90,16 @@ def top_samples_table(features, ft=None, fd=None, relative=False, index=['featur
 		else:
 			max_abundance = fd['abundance'].max()
 	if fd is None and ft is not None:
-		fd = nbseq.ft.fortify(ft[:,features], sample_col='ID', obs=True)
+		fd = fortify(ft[:,features], sample_col='ID', obs=True)
 	elif fd is not None:
 		fd = fd.loc[fd['feature'].isin(set(features)),:]
 	else:
 		raise ValueError("Must specify either ft or fd")
 
+	# fd['log_abundance']
 
+	# TODO: use log abundance and geometric mean, since abundances are approx log-normally distributed,
+	# otherwise z-score doesn't make much sense
 	index = intersection_ordered(index, list(fd.columns))
 	df2 = pd.merge(
 		fd.groupby('feature')['abundance'].agg(feature_mean='mean',feature_std='std'),
@@ -59,15 +120,16 @@ def top_samples_table(features, ft=None, fd=None, relative=False, index=['featur
 	)
 
 def fortify_feature_data(ft=None, fd=None, relative=False, features=None, var=False, obs=False, sample_col='ID', **kwargs):
+	from nbseq.ft import to_relative, fortify
 	if fd is not None:
 		if features is not None:
 			fd = fd.loc[fd['feature'].isin(set(features)),:]
 	elif ft is not None:
 		if relative:
-			ft = nbseq.ft.to_relative(ft)
+			ft = to_relative(ft)
 		if features is not None:
 			ft = ft[:,features]
-		fd = nbseq.ft.fortify(ft, sample_col=sample_col, obs=obs, var=var, **kwargs)
+		fd = fortify(ft, sample_col=sample_col, obs=obs, var=var, **kwargs)
 	else:
 		raise ValueError("Must specify either ft or fd")
 

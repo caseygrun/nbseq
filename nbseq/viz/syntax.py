@@ -11,6 +11,10 @@ class AminoAcidLexer(RegexLexer):
 
 	tokens = {
 		'root': [
+			# FASTA headers and comment lines
+			(r'>.*\n', Token.Name),
+			(r'#.*\n', Token.Comment),
+
 			# match amino acids
 			# Alanine (ALA)
 			(r"[Aa]+", Token.AA_A),
@@ -67,6 +71,8 @@ class AminoAcidLexer(RegexLexer):
 class AminoAcidChemistryAmbigStyle(Style):
 	default_style = ""
 	styles = {
+		Token.Name: 'bold #222',
+		Token.Comment: '#aaa',
 		Token.AA_B: '#0a0',
 		Token.AA_S: '#0a0',
 		Token.AA_T: '#0a0',
@@ -100,23 +106,84 @@ class AminoAcidChemistryAmbigStyle(Style):
 		Token.Gap: '#333',
 	}
 
-# class AminoAcidLexer(RegexLexer):
-#     name = 'FASTA format with clustal colors'
 
-#     tokens = {
-#         'root': [
-#             (r'[^/]+', Text),
-#             (r'/\*', Comment.Multiline, 'comment'),
-#             (r'//.*?$', Comment.Singleline),
-#             (r'/', Text)
-#         ],
-#         'comment': [
-#             (r'[^*/]', Comment.Multiline),
-#             (r'/\*', Comment.Multiline, '#push'),
-#             (r'\*/', Comment.Multiline, '#pop'),
-#             (r'[*/]', Comment.Multiline)
-#         ]
-#     }
+
+class NucleicAcidLexer(RegexLexer):
+	name = 'IUPAC ambiguous amino acid colors'
+
+	tokens = {
+		'root': [
+			# FASTA headers and comments
+			(r'>.*\n', Token.Name),
+			(r'#.*\n', Token.Comment),
+
+			# match nucleic acids
+			(r"[Aa]+", Token.NA_A),
+			(r"[Cc]+", Token.NA_C),
+			(r"[Tt]+", Token.NA_T),
+			(r"[Gg]+", Token.NA_G),
+
+			(r"[Uu]+", Token.NA_U),
+			(r"[Rr]+", Token.NA_R),
+			(r"[Yy]+", Token.NA_Y),
+			(r"[Ss]+", Token.NA_S),
+			(r"[Ww]+", Token.NA_W),
+			(r"[Mm]+", Token.NA_M),
+			(r"[Kk]+", Token.NA_K),
+			(r"[Dd]+", Token.NA_D),
+			(r"[Bb]+", Token.NA_B),
+			(r"[Vv]+", Token.NA_V),
+			(r"[Hh]+", Token.NA_H),
+			(r"[Nn]+", Token.NA_N),
+			(r"[Xx]+", Token.NA_X),
+
+			(r"[-]+",  Token.Gap),
+			(r".",     Token.NA_Unk)
+
+		]
+	}
+
+
+class NucleicAcidBioSyntaxStyle(Style):
+	default_style = ""
+	styles = {
+		Token.Name: 'bold #222',
+		Token.Comment: '#aaa',
+
+		Token.NA_A:   'bg:#47FF19 #000000',
+		Token.NA_T:   'bg:#4192FF #000000',
+		Token.NA_G:   'bg:#F09000 #000000',
+		Token.NA_C:   'bg:#FF4641 #000000',
+		Token.NA_U:   'bg:#8A89FF #000000',
+		Token.NA_R:   'bg:#FFFE80 #000000',
+		Token.NA_Y:   'bg:#E180FF #000000',
+		Token.NA_S:   'bg:#FF9B80 #000000',
+		Token.NA_W:   'bg:#80FFF2 #000000',
+		Token.NA_M:   'bg:#CE8834 #000000',
+		Token.NA_K:   'bg:#90B82C #000000',
+		Token.NA_D:   'bg:#C7FFB9 #000000',
+		Token.NA_B:   'bg:#F8C1C0 #000000',
+		Token.NA_V:   'bg:#FFE3B9 #000000',
+		Token.NA_H:   'bg:#BFD8F9 #000000',
+		Token.NA_N:   'bg:#FFFFFF #000000',
+		Token.NA_X:   'bg:#272822 #E6E6E6',
+		Token.NA_Gap: 'bg:#272822 #E6E6E6'
+	}
+
+
+class NucleicAcidUnambigStyle(Style):
+	default_style = ""
+	styles = {
+		Token.Name: 'bold #222',
+		Token.Comment: '#aaa',
+
+		Token.NA_A:   '#0a0',
+		Token.NA_C:   '#00f',
+		Token.NA_T:   '#f00',
+		Token.NA_G:   '#000',
+		Token.Gap:    '#333',
+		Token.NA_Unk: '#333'
+	}
 
 
 class Highlighter:
@@ -132,7 +199,7 @@ class Highlighter:
 		return HTML(self.highlight(text))
 
 	def get_style_defs(self):
-		return self.formatter.get_style_defs()
+		return self.formatter.get_style_defs() + " div.source>pre {white-space:pre;}"
 
 	def get_style_sheet_HTML(self):
 		return f"<style>{self.get_style_defs()}</style>"
@@ -146,4 +213,15 @@ def AminoAcid():
 	formatter = HtmlFormatter(cssclass="source", style=AminoAcidChemistryAmbigStyle)
 	return Highlighter(lexer, formatter)
 
+def NucleicAcid():
+	lexer = NucleicAcidLexer()
+	formatter = HtmlFormatter(cssclass="source", style=NucleicAcidUnambigStyle)
+	return Highlighter(lexer, formatter)
+
+def NucleicAcidAmbig():
+	lexer = NucleicAcidLexer()
+	formatter = HtmlFormatter(cssclass="source", style=NucleicAcidBioSyntaxStyle)
+	return Highlighter(lexer, formatter)
+
 aa_highlighter = AminoAcid()
+na_highlighter = NucleicAcid()
