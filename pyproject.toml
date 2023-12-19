@@ -1,0 +1,22 @@
+[project]
+name = "nbseq"
+version = "0.0.1"
+authors = [
+  { name="Casey Grun", email="casey.grun@yale.edu" },
+]
+description = "Routines for processing VHH-seq data"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/caseygrun/nbseq"
+Issues = "https://github.com/caseygrun/nbseq/issues"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
