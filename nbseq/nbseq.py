@@ -2,8 +2,9 @@ from pathlib import Path
 import hashlib
 
 import pandas as pd
-
+# import anndata
 # from anndata import AnnData
+
 from .utils import *
 from .cdrs import *
 from .asvs import get_identifier
@@ -169,7 +170,7 @@ class Experiment:
 		return dict(self._config)
 
 	@property
-	def viz(self) -> ExperimentVisualizer:
+	def viz(self) -> 'ExperimentVisualizer':
 		"""Helper to create visualizations from this Experiment"""
 		from .viz import ExperimentVisualizer
 		if self._viz is None:
@@ -177,7 +178,7 @@ class Experiment:
 		return self._viz
 
 	@property
-	def cart(self) -> Cart:
+	def cart(self) -> 'Cart':
 		"""'Cart' of rVHHs to resynthesize"""
 		if self._cart is None:
 			from .resynth import Cart
@@ -185,7 +186,7 @@ class Experiment:
 		return self._cart
 
 	@property
-	def fts(self) -> Mapping[str, anndata.AnnData]:
+	def fts(self) -> Mapping[str, 'anndata.AnnData']:
 		"""Count-based feature tables in each feature space. Keys are names of feature :py:attr:`spaces`."""
 		return dotdict(self._fts)
 
@@ -200,12 +201,12 @@ class Experiment:
 		return self._fts[next(iter(self._fts))].obs
 
 	@property
-	def tree(self) -> Mapping[str, skbio.tree.TreeNode]:
+	def tree(self) -> Mapping[str, 'skbio.tree.TreeNode']:
 		"""Phylogenetic trees in each feature space. Keys are feature space names"""
 		return dotdict(self._trees)
 
 	@property
-	def rfts(self) -> Mapping[str, anndata.AnnData]:
+	def rfts(self) -> Mapping[str, 'anndata.AnnData']:
 		"""Relative abundance feature tables in each feature space. Keys are names of feature :py:attr:`spaces`."""
 		if self._rfts is None:
 			from .ft import to_relative
@@ -214,7 +215,7 @@ class Experiment:
 		return dotdict(self._rfts)
 
 	@property
-	def dfs(self) -> Mapping[str, pd.DataFrame]:
+	def dfs(self) -> Mapping[str, 'pd.DataFrame']:
 		"""Feature tables of counts, converted to :py:func:`.ft.fortify` - fortified :py:`pd.DataFrame`s; keys are space names"""
 		from functools import partial
 		if self._dfs is None:
@@ -543,7 +544,14 @@ class Experiment:
                 config='config/config.yaml',
                 sql_db='intermediate/aa/asvs.db',
                 verbose=True, **kwargs):
-		"""Generate an Experiment object from a directory of files produced by the nbseq Snakemake pipeline
+		"""Generate an Experiment object from a directory of files produced by the `phage-seq` Snakemake pipelines
+
+		By default, this will read sample metadata as well as feature tables, feature metadata, and phylogenetic trees 
+		for the `aa` and `cdr3` feature spaces. You can load data for additional feature spaces by passing additional 
+		kwargs, e.g. to load a feature table for space `na`, pass `ft_na='results/tables/na/feature_table.biom'`.
+		To skip loading data fro the `aa` or `cdr3` space, pass `ft_aa=None`, `tree_aa=None`, etc. 
+
+		Missing files will note generate an error, but if `verbose=True`, a warning will be printed.
 
 		Parameters
 		----------
@@ -556,9 +564,9 @@ class Experiment:
 		config : str, optional
 			path to configuration file, by default 'config/config.yaml'
 		ft_$ : str, optional
-			path to feature table for space `$`; must be readable by :func:`ft.read`
+			path to feature table in BIOM or AnnData format for space `$`; must be readable by :func:`ft.read`
 		fd_$ : str, optional
-			path to feature metadata for space `$`
+			path to CSV file feature metadata for space `$`
 		tree_$ : str, optional
 			path to feature phylogeny for space `$`, in Newick (``.nwk``) format
 		mmseqs_db_$ : str, optional
@@ -572,8 +580,8 @@ class Experiment:
 
 		Returns
 		-------
-		_type_
-			_description_
+		Experiment
+			experiment object
 		"""
 
 		kwargs = {**dict(
