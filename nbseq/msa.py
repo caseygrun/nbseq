@@ -8,6 +8,13 @@ from Bio.Phylo.TreeConstruction import DistanceCalculator, DistanceMatrix
 from Bio.Align import MultipleSeqAlignment
 import itertools
 
+def run_command(cmd, output_fp, env=None, **kwargs):
+	import subprocess
+
+	print(' '.join(cmd))
+	with open(output_fp, 'w') as output_f:
+		subprocess.run(cmd, stdout=output_f, check=True, env=env, **kwargs)
+
 def mafft(sequences_fp, result_fp, alignment_fp=None, n_threads=0, parttree=False, addfragments=False):
 	# MAFFT uses --threads -1 to mean "auto"
 	if n_threads == 0:
@@ -32,10 +39,39 @@ def mafft(sequences_fp, result_fp, alignment_fp=None, n_threads=0, parttree=Fals
 	run_command(cmd, result_fp)
 
 
-def msa(sequences_fp, result_fp, method='mafft', **kwargs):
-	if method == 'mafft':
-		return mafft(sequences_fp, result_fp, **kwargs)
 
+def clustalo(sequences_fp, result_fp, log_fp=None, n_threads=0, **kwargs):
+	# clustalo --threads {threads} --in {input} --out {output} --log {log}
+
+	cmd = ["clustalo", "--threads", str(n_threads), '--in', str(sequences_fp), '--out', str(result_fp)]
+
+	if log_fp is not None:
+		cmd += ['--log', str(log_fp)]
+
+	run_cmd(cmd, **kwargs)
+
+def muscle(sequences_fp, result_fp, log_fp=None, n_threads=0, method="super5", **kwargs):
+	# muscle -super5 {input} -output {output} -threads {threads} 2>&1 > {log}
+
+	cmd = ["muscle", f"-{method}", sequences_fp, "-output", str(result_fp), "-threads", str(n_threads)]
+
+	if log_fp is not None:
+		cmd += ["2>&1", str(log_fp)]
+
+	run_cmd(cmd, shell=True, **kwargs)
+
+
+def msa(sequences_fp, result_fp, method='mafft', **kwargs):
+	methods = {
+		'mafft': mafft,
+		'clustalo': clustalo,
+		'muscle': muscle,
+	}
+	method = method.lower()
+	if method in methods:
+		return methods[method](sequences_fp, result_fp, **kwargs)
+	else:
+		raise ValueError(f"Unrecognized msa method {method}. Recognized methods are {list(methods.keys())}")
 
 
 def fasttree(alignment_fp, tree_fp, mode='aa', n_threads = 0):
