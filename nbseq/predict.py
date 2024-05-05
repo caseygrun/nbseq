@@ -1,22 +1,20 @@
-import sklearn.model_selection
-from sklearn.model_selection import StratifiedKFold, LeaveOneOut
-from sklearn.metrics import auc
-from sklearn.base import clone
-from joblib import Parallel, delayed
-
 import warnings
-
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
-
-
-from sklearn.model_selection import LeavePOut, KFold, StratifiedKFold, RepeatedStratifiedKFold, GridSearchCV
 from itertools import chain, combinations
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import sklearn.model_selection
+from joblib import Parallel, delayed
+from matplotlib.patches import Patch
+from sklearn.base import clone
+from sklearn.metrics import auc
+from sklearn.model_selection import (GridSearchCV, KFold, LeaveOneOut,
+                                     LeavePOut, RepeatedStratifiedKFold,
+                                     StratifiedKFold)
 from sklearn.utils.validation import _num_samples
 
 from .utils import ilen
-
 
 
 class LeavePairOut(LeavePOut):
@@ -60,123 +58,26 @@ class LeavePairOut(LeavePOut):
 
 import sklearn.metrics
 
-# Monkey patch the plot method of RocCurveDisplay to prevent it from trying to show the legend when empty (and thus generating lots of unsuppressable warning messages from matplotlib
-# Not needed as of sklearn 1.3.0
-# def _RocCurveDisplay_plot(self, ax=None, *, name=None, **kwargs):
-# 	"""Plot visualization
-# 	Extra keyword arguments will be passed to matplotlib's ``plot``.
-# 	Parameters
-# 	----------
-# 	ax : matplotlib axes, default=None
-# 		Axes object to plot on. If `None`, a new figure and axes is
-# 		created.
-# 	name : str, default=None
-# 		Name of ROC Curve for labeling. If `None`, use `estimator_name` if
-# 		not `None`, otherwise no labeling is shown.
-# 	Returns
-# 	-------
-# 	display : :class:`~sklearn.metrics.plot.RocCurveDisplay`
-# 		Object that stores computed values.
-# 	"""
-
-# 	name = self.estimator_name if name is None else name
-
-# 	line_kwargs = {}
-# 	if self.roc_auc is not None and name is not None:
-# 		line_kwargs["label"] = f"{name} (AUC = {self.roc_auc:0.2f})"
-# 	elif self.roc_auc is not None:
-# 		line_kwargs["label"] = f"AUC = {self.roc_auc:0.2f}"
-# 	elif name is not None:
-# 		line_kwargs["label"] = name
-
-# 	line_kwargs.update(**kwargs)
-
-# 	import matplotlib.pyplot as plt
-
-# 	if ax is None:
-# 		fig, ax = plt.subplots()
-
-# 	(self.line_,) = ax.plot(self.fpr, self.tpr, **line_kwargs)
-# 	info_pos_label = (
-# 		f" (Positive label: {self.pos_label})" if self.pos_label is not None else ""
-# 	)
-
-# 	xlabel = "False Positive Rate" + info_pos_label
-# 	ylabel = "True Positive Rate" + info_pos_label
-# 	ax.set(xlabel=xlabel, ylabel=ylabel)
-
-# 	if "label" in line_kwargs and (len(line_kwargs['label']) > 0) and (line_kwargs['label'][0] != '_'):
-# 		ax.legend(loc="lower right")
-
-# 	self.ax_ = ax
-# 	self.figure_ = ax.figure
-# 	return self
-
-# sklearn.metrics.RocCurveDisplay.plot = _RocCurveDisplay_plot
-
-
-def plot_cv_indices(cv, X, y, group=None, ax=None, cmap_data = plt.cm.Paired, cmap_cv = plt.cm.coolwarm, lw = 10):
-    """Plot the indices of a cross-validation object.
-    https://scikit-learn.org/stable/auto_examples/model_selection/plot_cv_indices.html
-    """
-
-    n_splits = cv.get_n_splits(X, y, group)
-    n_y = len(y)
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(len(y)*0.2, n_splits*0.2))
-
-    # Generate the training/testing visualizations for each CV split
-    for ii, (tr, tt) in enumerate(cv.split(X=X, y=y, groups=group)):
-        # Fill in indices with the training/test groups
-        indices = np.array([np.nan] * len(X))
-        indices[tt] = 1
-        indices[tr] = 0
-
-        # Visualize the results
-        ax.scatter(
-            range(len(indices)),
-            [ii + 0.5] * len(indices),
-            c=indices,
-            marker="_",
-            lw=lw,
-            cmap=cmap_cv,
-            vmin=-0.2,
-            vmax=1.2,
-        )
-        pos = sum(y[tr])
-        neg = len(y[tr])-pos
-        
-        ax.text(x=n_y, y=ii+0.5, s=f"{pos}+ / {neg}-")
-
-    # Plot the data classes and groups at the end
-    ax.scatter(
-        range(len(X)), [ii + 1.5] * len(X), c=y, marker="_", lw=lw, cmap=cmap_data
-    )
-
-    if group is not None:
-        ax.scatter(
-            range(len(X)), [ii + 2.5] * len(X), c=group, marker="_", lw=lw, cmap=cmap_data
-        )
-
-    # Formatting
-    yticklabels = list(range(n_splits)) + ["class"]
-    if group is not None:
-        yticklabels += ["group"]
-
-    ax.set(
-        yticks=np.arange(n_splits + 1 + (group is not None)) + 0.5,
-        yticklabels=yticklabels,
-        xlabel="Sample index",
-        ylabel="CV iteration",
-        ylim=[n_splits + (1.1 * (1 + (group is not None))), -0.2],
-        xlim=[0, len(y)],
-    )
-    #ax.set_title("{}".format(type(cv).__name__), fontsize=15)
-    ax.set_title(repr(cv))
-    return ax
-
 
 def synthesize_input_controls(ft, ag_names=[], input_library_query="expt == '027i.lib'", verbose=True):
+	"""Adds a number of fake samples to a given feature table by combining random permutations of the "input" sequencing library 
+
+	Parameters
+	----------
+	ft : anndata.AnnData
+		feature table. Must have `obs` metadata column `r` giving the number of rounds
+	ag_names : list, optional
+		list of antigen names; the new samples will have these columns set to 0 in their `obs` metadata, by default []
+	input_library_query : str, optional
+		query suitable for `ft.query` to identify which rows of `ft` represent the "input" library observations, by default "expt == '027i.lib'"
+	verbose : bool, optional
+		Print extra debuggin information, by default True
+
+	Returns
+	-------
+	anndata.AnnData
+		updated feature table with the synthetic controls appended
+	"""
 	from .ft import query_ids
 
 	ft = ft.copy()
@@ -413,16 +314,17 @@ def plot_hyperparam_grid(search, param_grid, limit_x=None, df=None, ax=None):
 	return ax
 
 def plot_hyperparam_progress(summary, ax=None):
-    if ax is None:
-        fig, ax = plt.subplots()
-    x_labels = summary['new_params'].apply(pprint_dict)
-    xs = range(len(x_labels))
-    ax.errorbar(xs, summary['mean_test_score'], yerr=summary['std_test_score'])
-    ax.set_xticks(xs)
-    ax.set_xticklabels(x_labels, rotation=-45, horizontalalignment='left');
+	if ax is None:
+		fig, ax = plt.subplots()
+	x_labels = summary['new_params'].apply(pprint_dict)
+	xs = range(len(x_labels))
+	ax.errorbar(xs, summary['mean_test_score'], yerr=summary['std_test_score'])
+	ax.set_xticks(xs)
+	ax.set_xticklabels(x_labels, rotation=-45, horizontalalignment='left');
 
 
 from collections import namedtuple
+
 SerialHyperparamSearchResults = namedtuple('SerialHyperparamSearchResults', ['summary', 'best_params', 'spaces'])
 
 def serial_hyperparam_search(estimator, X, y, starting_params, param_grids,
@@ -433,11 +335,12 @@ def serial_hyperparam_search(estimator, X, y, starting_params, param_grids,
 	""" Perform serial hyperparameter searches; choose best set of hyperparameters at each step and use for training model at next step.
 	"""
 
+	import datetime
+	from statistics import NormalDist
+
+	import pandas as pd
 	from sklearn import clone
 	from sklearn.model_selection import cross_val_score
-	from statistics import NormalDist
-	import pandas as pd
-	import datetime
 
 	base_estimator = clone(estimator)
 	current_best_params = { **starting_params }
@@ -536,3 +439,76 @@ def serial_hyperparam_search(estimator, X, y, starting_params, param_grids,
 		plot_hyperparam_progress(summary, ax=ax)
 
 	return SerialHyperparamSearchResults(summary, current_best_params, step_spaces)
+
+
+
+
+def fit_and_test_model_antigen(design, ag_matrix, ag, 
+							   model = None, 
+							   auto_scale_pos_weight=None,
+							   shuffle=False,
+							   plot=True, plot_minimal=True, aggregate_folds=True, ax=None, plot_kws = None,
+							   # predict = lambda model, X_test: np.around(model.predict(X_test)), 
+							   verbose=True,
+							   **kwargs):
+	
+	from textwrap import indent
+
+	from sklearn import clone
+	from sklearn.metrics import roc_auc_score
+
+	from .design import get_design_for_ag
+
+	if model is None:
+		import xgb
+		model = xgb.XGBClassifier(use_label_encoder=False, **{'eval_metric':'logloss'})
+	if plot:
+		from .viz.predict import plot_roc
+
+	train_idx, X_train, X_unknown, y = get_design_for_ag(design, ag_matrix, ag, shuffle=shuffle)
+	
+	if auto_scale_pos_weight is None:
+		auto_scale_pos_weight = isinstance(model, xgb.XGBClassifier)
+	if auto_scale_pos_weight:
+		model.set_params(scale_pos_weight=(sum(y == 0)/sum(y > 0)))
+		
+	if verbose:
+		print(f"{ag}{f' SHUFFLE {shuffle}' if shuffle else ''} : # samples = ")
+		print(indent(y.value_counts().to_string(), "    "))
+		if auto_scale_pos_weight: print("(Setting `scale_pos_weight` to sqrt(# neg / # pos))")
+		print(model)
+
+	model_unknown = clone(model)
+	
+	out = cross_val_multi_predict(
+		clone(model), 
+		X_train, y, 
+		methods={
+			'y_hat':'predict', 
+			'p_y': lambda m, X, y: m.predict_proba(X)[:,1]
+		}, 
+		verbose=verbose, **kwargs)
+	cv_out = pd.DataFrame(out)
+	cv_out['score'] = (cv_out['y'] == cv_out['y_hat']).astype(int)
+	
+	if not aggregate_folds:
+		scores = cv_out.groupby('fold').apply(lambda g: sklearn.metrics.roc_auc_score(g['y'], g['p_y'])).rename('roc_auc')
+	else:
+		scores = pd.Series([roc_auc_score(cv_out['y'], cv_out['p_y'])], name='roc_auc')
+
+	if plot_kws is None:
+		plot_kws = dict()
+	if plot:
+		plot_roc(cv_out, 
+				 aggregate_folds=aggregate_folds,
+				 title=f"{ag}{(', shuffle ' + shuffle) if shuffle else ''}",
+				 verbose=verbose, ax=ax, **plot_kws)
+		
+	model_unknown.fit(X_train, y)
+	if isinstance(design, AnnData):
+		index = design.obs_names[~train_idx]
+	else:
+		index = design.index[~train_idx]
+	y_unknown = pd.Series(model_unknown.predict(X_unknown), index=index, name=ag)
+	
+	return {'y_unknown': y_unknown, 'model_unknown':model_unknown, 'cv':cv_out, 'scores':scores }
