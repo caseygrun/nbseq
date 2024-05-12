@@ -9,7 +9,7 @@ authors = [
 ]
 description = "Routines for processing VHH-seq data"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.7"
 license = {text = "MIT"}
 classifiers = [
     "Programming Language :: Python :: 3",
