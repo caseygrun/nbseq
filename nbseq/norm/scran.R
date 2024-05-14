@@ -38,8 +38,14 @@ norm_scran <- function(x, subset.row=NULL) {
 
 	if (verbose) { message("Using ", d, " principal components for clustering") }
 
+	# note: rows of ft are features, columns are cells (samples)
+	min_cluster_size <- 100
+	if(ncol(ft) < min_cluster_size) {
+		min_cluster_size <- 0
+		if (verbose) { message("Number of feature table samples = ", ncol(ft), ", setting minimum cluster size to ", min_cluster_size) }
+	}
 	# assign samples into clusters
-	clusters <- scran::quickCluster(ft, d=d)
+	clusters <- scran::quickCluster(ft, d=d, min.size=min_cluster_size)
 
 	if (verbose) { message("Calculating sum factors by deconvolution...") }
 
