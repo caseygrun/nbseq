@@ -565,7 +565,7 @@ class Experiment:
                 phenotypes='config/phenotypes.csv',
                 config='config/config.yaml',
                 sql_db='intermediate/aa/asvs.db',
-                verbose=True, **kwargs):
+                verbose=True, strict=False, **kwargs):
 		"""Generate an Experiment object from a directory of files produced by the `phage-seq` Snakemake pipelines
 
 		By default, this will read sample metadata as well as feature tables, feature metadata, and phylogenetic trees 
@@ -599,6 +599,8 @@ class Experiment:
 			path to SQLite database, by default 'intermediate/aa/asvs.db'
 		verbose : bool, optional
 			print paths to files, file size, etc. while reading; by default True
+		strict : bool, optional
+			True to raise Exception if any indicated files are missing, False to print a warning (if `verbose`) or ignore silently; by default False
 
 		Returns
 		-------
@@ -607,7 +609,8 @@ class Experiment:
 		"""
 
 		kwargs = {**dict(
-			fd_cdr3='intermediate/cdr3/features/all/asvs.csv',
+			# fd_cdr3='intermediate/cdr3/features/all/asvs.csv',
+			fd_cdr3='results/tables/cdr3/asvs.csv',
 			ft_aa='results/tables/aa/feature_table.biom',
 			ft_cdr3='results/tables/cdr3/feature_table.biom',
 			tree_aa='intermediate/aa/features/top_asvs/alpaca/asvs.nwk',
@@ -636,6 +639,12 @@ class Experiment:
 		realdir = os.path.realpath(directory)
 		name = os.path.basename(realdir)
 
+		def warn_or_err(msg):
+			if strict:
+				raise ValueError(msg)
+			else:
+				print(f"- Warning: {msg}")
+
 		if verbose:
 			print(f"Loading experiment {name} from '{realdir}'...")
 			print(f"- Reading metadata from {metadata} ...")
@@ -644,12 +653,14 @@ class Experiment:
 
 		if phenotypes is None:
 			print(f"- Warning: no phenotypes table given.")
-		elif not os.path.isfile(Path(directory) / phenotypes):
-			print(f"- Warning: phenotypes table '{phenotypes}' does not exist!")
 		else:
-			if verbose:
-				print(f"- Reading phenotypes from {phenotypes} ...")
-			phenotypes = read_delim_auto(phenotypes).set_index('name', drop=True)
+			phenotypes_path = Path(directory) / phenotypes
+			if not os.path.isfile(phenotypes_path):
+				warn_or_err(f"phenotypes table '{phenotypes_path}' does not exist!")
+			else:
+				if verbose:
+					print(f"- Reading phenotypes from {phenotypes_path} ...")
+				phenotypes = read_delim_auto(phenotypes_path).set_index('name', drop=True)
 
 		if verbose:
 			print(f"- Reading Config from {config} ...")
@@ -659,7 +670,7 @@ class Experiment:
 		sql_db_path = os.path.abspath(Path(directory) / sql_db)
 		sql_db = 'sqlite:///' + str(sql_db_path)
 		if not os.path.isfile(sql_db_path):
-			print(f"- Warning: sqlite database '{sql_db_path}' does not exist")
+			warn_or_err(f"sqlite database '{sql_db_path}' does not exist")
 		else:
 			if verbose:
 				print(f"- Using SQL database at '{sql_db}'")
@@ -701,12 +712,12 @@ class Experiment:
 				space = k.split('fd_', 1)[-1]
 
 				if v is None:
-					print(f"- Warning: not loading feature data for space '{space}'; path was None")
+					if verbose: print(f"- Warning: not loading feature data for space '{space}'; path was None")
 					continue
 
 				fd_path = Path(directory) / v
 				if not os.path.isfile(fd_path):
-					print(f"- Warning: feature data for table '{space}' at '{fd_path}' does not exist!")
+					warn_or_err(f"feature data for table '{space}' at '{fd_path}' does not exist!")
 				else:
 					identifier = get_identifier(space)
 
@@ -729,7 +740,7 @@ class Experiment:
 					space = k.split('mmseqs_db_', 1)[-1]
 					mmseqs_db_path = Path(directory) / v
 					if not os.path.isfile(mmseqs_db_path):
-						print(f"- Warning: mmseqs2 database for space '{space}' at '{mmseqs_db_path}' does not exist!")
+						warn_or_err(f"mmseqs2 database for space '{space}' at '{mmseqs_db_path}' does not exist!")
 					else:
 						if verbose:
 							print(f"- Using mmseqs2 database '{space}' at '{mmseqs_db_path}'")
@@ -740,8 +751,7 @@ class Experiment:
 
 					tree_path = Path(directory) / v
 					if not os.path.isfile(tree_path):
-						print(
-							f"- Warning: phylogeny for space '{space}' at '{tree_path}' does not exist!")
+						warn_or_err(f"phylogeny for space '{space}' at '{tree_path}' does not exist!")
 					else:
 						import skbio.tree
 
@@ -755,6 +765,8 @@ class Experiment:
 					space = k.split('ft_', 1)[-1]
 
 					ft_path = Path(directory) / v
+					if not os.path.isfile(ft_path):
+						warn_or_err(f"feature table for space '{space}' at '{ft_path}' does not exist!")
 					if verbose:
 						print(
 							f"- Reading {space} feature table from {ft_path} ({filesize(ft_path.stat().st_size)})...")
@@ -765,6 +777,9 @@ class Experiment:
 					)
 					fts[space] = add_feature_data(fts[space], 'reads', 'nsamples')
 
+					if fts[space].var.name is None:
+						fts[space].var.name = get_identifier(space)
+
 				# enrichment ecdf
 				elif k.startswith('enr_model_'):
 					space = k.split('enr_model_', 1)[-1]
@@ -773,7 +788,7 @@ class Experiment:
 					from .select import load_cond_ecdf
 
 					if not os.path.isfile(ecdf_path):
-						print(f"- Warning: enrichment model for space '{space}' at '{ecdf_path}' does not exist!")
+						warn_or_err(f"enrichment model for space '{space}' at '{ecdf_path}' does not exist!")
 					else:
 						if verbose:
 							print(
