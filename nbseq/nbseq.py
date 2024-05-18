@@ -777,8 +777,8 @@ class Experiment:
 					)
 					fts[space] = add_feature_data(fts[space], 'reads', 'nsamples')
 
-					if fts[space].var.name is None:
-						fts[space].var.name = get_identifier(space)
+					if fts[space].var.index.name is None:
+						fts[space].var.index.name = get_identifier(space)
 
 				# enrichment ecdf
 				elif k.startswith('enr_model_'):
