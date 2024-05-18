@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import panel as pn
 import scipy.stats.mstats
 
-from ..utils import sample_metadata_to_selection_metadata, clamp_finite, replace_multiple
+from ..utils import sample_metadata_to_selection_metadata, clamp_finite, get_rounds, replace_multiple
 from ..ft import dataframe_to_anndata, to_relative, fortify, fortify_top_asvs, query as ft_query
 from .. import select as nbselect
 from ..asvs import get_identifier
@@ -15,7 +15,7 @@ from .utils import (
     hash_to_color, pretty_hex, pack_hex, hash_to_mn_short,
     buffer_to_figure, figure_to_buffer, sparkline, figure_to_sparkline,
     mini_histogram, plot_mini_histogram, plot_abundance_sparkline,
-    rug_bar
+    rug_bar,
 )
 
 from .sample import alt_scale_features
@@ -482,6 +482,23 @@ def enrichment_abundance_plot(df, selector, feature_scale, features=None):
     return enrabdplot
 
 
+# todo
+def SelectionGroupData():
+    def __init__(self,ft_pos, df_selections, df_samples, df_samples_top, df_features, df_enr_features, sel_fts_q, features):
+        self.ft_pos = ft_pos
+        self.df_selections = df_selections
+        self.df_samples = df_samples
+        self.df_samples_top = df_samples_top
+        self.df_features = df_features
+        self.df_enr_features = df_enr_features
+        self.sel_fts_q = sel_fts_q
+        self.features = features
+
+    @staticmethod
+    def _calculate(*args):
+        return SelectionGroupData(*_calculate_selection_group_dashboard_phenotype(*args))
+
+
 def _calculate_selection_group_dashboard_phenotype(
     ft, ft_enr, df_enr, sel_fts, pos_query, neg_query,
     feature_col, space, phenotype):
@@ -821,6 +838,7 @@ def selection_group_dashboard(ex,
         feature_col = get_identifier(space)
         ft = ex.query(global_query, space=space, axis='sample')
 
+        nonlocal rounds
         if rounds is None:
             rounds = get_rounds(ft.obs)
 

@@ -137,6 +137,7 @@ class Experiment:
 	_phenotype_matrix = None
 	_antigen_matrix = None
 	_selection_metadata = None
+	_expt_metadata = None
 	_cart = None
 
 	def __repr__(self):
