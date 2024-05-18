@@ -1,4 +1,4 @@
-from altair_transform import transform_chart
+# from altair_transform import transform_chart
 import numpy as np
 import pandas as pd
 import altair as alt
