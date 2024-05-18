@@ -89,7 +89,7 @@ class Config(dotdict):
 
 	"""Phage display libraries included in this experiment. Dict where keys are
 	library names and values are :py:class:`LibraryConfig` objects."""
-	libraries: {}
+	libraries = {}
 
 
 class Experiment:
@@ -280,7 +280,7 @@ class Experiment:
 	def summarize():
 		pass
 
-	@propery
+	@property
 	def expt_metadata(self):
 		"""Print a summary of each sub-experiment within this experiment, showing the number of selections, number of rounds, and which phage libraries were involved"""
 		if self._expt_metadata is None:

@@ -100,8 +100,9 @@ def feature_table_to_unique_sequences(feature_table):
 
 
 
-def sample_metadata_to_expt_metadata(obs, expt_col='expt',selection_col='name')
+def sample_metadata_to_expt_metadata(obs, expt_col='expt',selection_col='name'):
     """adapt a dataframe of metadata per-sample to one per-experiment (expt), showing the number of selections, number of rounds, and which phage libraries were involved"""
+    import pandas as pd
 
     group = obs.groupby(expt_col)
 

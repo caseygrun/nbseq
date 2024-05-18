@@ -1069,10 +1069,10 @@ def fortify_feature_data(ft=None, fd=None, relative=False, features=None, var=Fa
 			fd = fd.loc[fd['feature'].isin(set(features)),:]
 	elif ft is not None:
 		if relative:
-			ft = nbseq.ft.to_relative(ft)
+			ft = to_relative(ft)
 		if features is not None:
 			ft = ft[:,features]
-		fd = nbseq.ft.fortify(ft, sample_col=sample_col, obs=obs, var=var, **kwargs)
+		fd = fortify(ft, sample_col=sample_col, obs=obs, var=var, **kwargs)
 	else:
 		raise ValueError("Must specify either ft or fd")
 
