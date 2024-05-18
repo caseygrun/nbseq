@@ -22,7 +22,7 @@ from .sample import alt_scale_features
 
 
 
-# # monkey match panel.pane.vega._get_selections, because now in vega-lite v5/altair v5,
+# # monkey patch panel.pane.vega._get_selections, because now in vega-lite v5/altair v5,
 # # selections are replaced with more general parameters. Surprisingly with this hack,
 # # panel's handling otherwise still works!
 # import panel.pane.vega
@@ -804,10 +804,10 @@ def _make_overview_simple(df_samples_top, df_features, feature_col, tree=None, i
 
 def selection_group_dashboard(ex, 
                               starting_phenotype=None, 
-                              global_query="expt == '027j' & io == 'i' & kind == '+'",
+                              global_query="io == 'i' & kind == '+'",
                               pos_query = "{phenotype} == 1",neg_query = "({phenotype} == 0 | {phenotype} == -1)", 
                               enr_comparison=('start', 'end'), 
-                              rounds=['R5i','R6i','R7i','R8i'],
+                              rounds=None, #['R5i','R6i','R7i','R8i'],
                               tree=True,
                               initial_selection=[],
                               n_jobs=1):
@@ -821,6 +821,9 @@ def selection_group_dashboard(ex,
         feature_col = get_identifier(space)
         ft = ex.query(global_query, space=space, axis='sample')
 
+        if rounds is None:
+            rounds = get_rounds(ft.obs)
+
         # calculate enrichment df, add p-values and start/end abundance
         df_enr = nbselect.enr(ft, method='df', comparison=enr_comparison,
                                   dropna=True, 
@@ -832,9 +835,12 @@ def selection_group_dashboard(ex,
         # df_enr = nbselect.enrichment_start_end(df_enr, inplace=True)
         # df_enr = nbselect.enrichment_rank(df_enr, inplace=True)
 
+        if (feature_col not in df_enr.columns) and ('feature' in df_enr.columns):
+            df_enr[feature_col] = df_enr['feature']
+
         # make several feature tables grouped by selection
         sel_fts = {
-            col: dataframe_to_anndata(df_enr, obs=ex.selection_metadata, obs_col='name', var_col=feature_col, value_col=col) for col in ['enrichment', 'log_enrichment', 'sig', 'p_value', 'R5i', 'R8i', 'start', 'end']
+            col: dataframe_to_anndata(df_enr, obs=ex.selection_metadata, obs_col='name', var_col=feature_col, value_col=col) for col in ['enrichment', 'log_enrichment', 'sig', 'p_value', rounds[0], rounds[-1], 'start', 'end']
         }
         ft_enr = sel_fts['enr'] = sel_fts['enrichment']
         sel_fts['pct'] = nbselect.calculate_enrichment_pct(ft_enr)
