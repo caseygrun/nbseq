@@ -144,7 +144,7 @@ class Experiment:
 		out = [f"Experiment('{self.name}') with layers:"]
 
 		for k, ft in self._fts.items():
-			out.append(f"- {k:<8}: {ft.shape[0]} x {ft.shape[1]}, database: {self._mmseqs_dbs.get(k, 'None')}")
+			out.append(f"- {k:<8}: {ft.shape[0]} samples x {ft.shape[1]} features, database: {self._mmseqs_dbs.get(k, 'None')}")
 			# out.append(f"	var: {ft.var.columns.values}")
 
 			out.append(
@@ -276,6 +276,28 @@ class Experiment:
 		print(textwrap.fill(
 			f"- Other columns: {other_cols}", 
 			subsequent_indent="   ",break_on_hyphens=False))		
+
+	def summarize():
+		pass
+
+	@propery
+	def expt_metadata(self):
+		"""Print a summary of each sub-experiment within this experiment, showing the number of selections, number of rounds, and which phage libraries were involved"""
+		if self._expt_metadata is None:
+			self._expt_metadata = sample_metadata_to_expt_metadata(self.obs)
+		return self._expt_metadata
+
+	def _summarize_expts(self):
+		em = self.expt_metadata
+
+		out = []
+		out.append(f"{len(em)} sub-experiment(s):")
+		for expt, row in em.iterrows():
+			out.append(f"- {expt}: {row['selections']} selections, {row['fewest_rounds_per_selection']} - {row['most_rounds_per_selection']} rounds per selection ({row['rounds']}), using libraries {row['phage_libraries']}")
+		return "\n".join(out)
+
+	def summarize_expts(self):
+		print(self._summarize_expts())
 
 	def summarize_selections(self):
 		"""Print a summary of selection conditions represented by this experiment"""

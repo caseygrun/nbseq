@@ -99,6 +99,23 @@ def feature_table_to_unique_sequences(feature_table):
     return seq_records
 
 
+
+def sample_metadata_to_expt_metadata(obs, expt_col='expt',selection_col='name')
+    """adapt a dataframe of metadata per-sample to one per-experiment (expt), showing the number of selections, number of rounds, and which phage libraries were involved"""
+
+    group = obs.groupby(expt_col)
+
+    df = pd.DataFrame(index=obs[expt_col].unique())
+    df['selections'] = group[selection_col].nunique()
+
+    # get number of rounds for selection
+    rs = obs.groupby([expt_col,selection_col])['r'].nunique().reset_index()
+    df['fewest_rounds_per_selection'] = rs.groupby(expt_col).min()['r']
+    df['most_rounds_per_selection'] = rs.groupby(expt_col).max()['r']
+    df['rounds'] = group['round'].apply(lambda x: ','.join(sorted(set(x))))
+    df['phage_libraries'] = group['phage_library'].apply(lambda x: ','.join(sorted(set(x))))
+    return df
+
 def sample_metadata_to_selection_metadata(sample_metadata, selection_col='name'):
     """adapt a dataframe of metadata per-sample to one per-selection. 
 
@@ -144,6 +161,11 @@ def summarize_selection_phenotypes(selection_metadata, phenotypes):
         print(f"Warning: the following phenotypes are not found in the sleection metadata: {bad_phenotypes}.")
     
     return selection_metadata[good_phenotypes].apply(summarize_phenotypes, axis=1)
+
+def get_rounds(obs, round_col='round'):
+    """gets a sorted list of rounds (e.g. ['R2i', 'R3i', 'R4i']) from a dataframe of sample metadata"""
+    return sorted(obs[round_col].unique())
+
 
 
 def seqrecords_to_dataframe(records, transform=None, include_annotations=True):
