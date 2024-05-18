@@ -76,13 +76,19 @@ def read_delim_auto(path, **kwargs):
 
     fn, ext = os.path.splitext(path)
     ext = ext.lower()
+
+    # allow .csv.gz, .tsv.gz to be treated as .csv, .tsv respectively
+    # (pandas will detect compression from filename and decompress 
+    # automatically)
+    if ext == '.gz':
+        fn, ext = os.path.splitext(fn)
     if ext == '.csv':
         return pd.read_csv(str(path), **{'sep': ',', **kwargs})
     elif ext == '.tsv' or ext == 'txt':
         return pd.read_csv(str(path), **{'sep': "\t", **kwargs})
     else:
         raise ValueError(
-            f"Unable to guess delimiter from file wiht extension '{ext}'")
+            f"Unable to guess delimiter from file with extension '{ext}'")
 
 
 def feature_table_to_unique_sequences(feature_table):
