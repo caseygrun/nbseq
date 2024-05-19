@@ -1188,7 +1188,7 @@ class FeatureData():
         self.df_sample = df_sample
         self.df_selection = df_selection
 
-    def subset(self,feature, ):
+    def subset(self, feature):
         identifier = get_identifier(self.space)
         return FeatureData(ft=self.ft, 
                            space=self.space,
@@ -1393,14 +1393,14 @@ def vhh_dashboard(
         ):
 
     # setup
-    data = FeatureData.from_experiment(ex, global_query=global_query, space='cdr3', enr_comparison=enr_comparison, abbreviations=abbreviations)
+    full_data = FeatureData.from_experiment(ex, global_query=global_query, space='cdr3', enr_comparison=enr_comparison, abbreviations=abbreviations)
 
     # pre-build cache of histograms; for each sample, hist of feature enrichments
-    sample_enr_dist_buffers = data.df_enr.groupby(
+    sample_enr_dist_buffers = full_data.df_enr.groupby(
         'name')['log_enrichment'].apply(plot_dist_buffer)
     
     def make_vhh_dashboard(feature):
-        data = data.subset(feature)
+        data = full_data.subset(feature)
 
         if len(data.df_enr) == 0:
             return pn.pane.Alert((
@@ -1496,13 +1496,14 @@ def vhh_dashboard(
             return tag(feature, space=space)
 
         overview = pn.pane.Vega(feature_selection_overview(
-            feature), debounce=1000, show_actions=True)
+            feature, data), debounce=1000, show_actions=True)
         
         nonlocal show_table
         if show_table:
-            table = feature_selection_table(feature, 
-                            show_histograms=show_histograms,
-                            show_traces=show_traces)
+            table = feature_selection_table(
+                feature, data,
+                show_histograms=show_histograms,
+                show_traces=show_traces)
 
         def filter_table(df, selection):
             if selection is None or len(selection) == 0:
