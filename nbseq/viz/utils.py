@@ -387,10 +387,12 @@ def rich_table(df,
     column_index = dict(zip(list(df.columns), range(len(df.columns))))
     if len(color_columns) > 0:
         # dfs = dfs.applymap(lambda c: f"background-color: #{c}; color: {contrasting_color('#'+c)}", subset=color_columns)
+        # nb: applymap deprecated in pandas ~2.1, replaced by map(axis=None)
         dfs = dfs.applymap(lambda c: f"background-color: #{c}; color:#ffffff",
                            # subset must be a valid input to DataFrame.loc if more than one column is given,
                            # hence this is basically dfs.loc[:,color_columns]
-                           subset=(slice(None), color_columns))
+                           # can't index using a set, so cast to list
+                           subset=(slice(None), list(color_columns)))
     if len(monospace_columns) > 0:
         for col in monospace_columns:
             table_styles.append(
