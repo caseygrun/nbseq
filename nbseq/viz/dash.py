@@ -1390,6 +1390,7 @@ def vhh_dashboard(
         show_histograms=True,
         show_traces=True,
         show_table=True,
+        starting_phenotype=None
         ):
 
     # setup
@@ -1496,7 +1497,7 @@ def vhh_dashboard(
             return tag(feature, space=space)
 
         overview = pn.pane.Vega(feature_selection_overview(
-            feature, data), debounce=1000, show_actions=True)
+            feature, data, starting_phenotype=starting_phenotype), debounce=1000, show_actions=True)
         
         nonlocal show_table
         if show_table:
