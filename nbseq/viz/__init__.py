@@ -98,8 +98,14 @@ class ExperimentVisualizer():
 	# 		sample_abundance_plot(features, fd=fd, relative=relative).draw(show=True)
 	
 	def top_feature_barplot(self, query, space='cdr3', n=30, select_from_round=None, x='r:O', **kwargs):
-		from ..sample import top_asv_barplot_alt
+		from .sample import top_asv_barplot_alt
 		return top_asv_barplot_alt(self.fts[space], query, n=n, select_from_round=select_from_round, x=x, **kwargs)
+
+	def top_feature_traceplot(
+        self, query, space='cdr3', tooltip=['feature', 'name', 'description'], features=None, n=50, **kwargs):
+		from .sample import top_feature_traceplot
+		
+		return top_feature_traceplot(self, query, space=space, tooltip=tooltip, features=None, n=n, selector=True, feature_scale=None)
 
 	def abundance_trace_plot(self, feature, space='cdr3', phenotype=None, facet=None, limits=None, title=None):
 		from ..ft import fortify

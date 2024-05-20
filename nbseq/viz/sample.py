@@ -4,7 +4,7 @@ from plotnine import *
 from ..ft import *
 from .asv import hash_to_color, pretty_hex, pack_hex
 from .utils import contrasting_color
-
+from ..asvs import get_identifier
 
 import anndata
 from anndata import AnnData
@@ -95,6 +95,8 @@ def alt_scale_features(features, sort=False, **kwargs):
         features = features.values
     if sort:
         features = sorted(features)
+
+    
 
     return alt.Scale(domain=features, range=[hash_to_color(f) for f in features])
 
@@ -266,45 +268,70 @@ def top_asv_lineplot(
         gg = gg + p9.ggtitle(title)
     return gg
 
-def feature_traceplot(
-        ft, query, detail='feature', tooltip=['feature', 'name', 'description'],
+def top_feature_traceplot(
+        ex, query, space='cdr3', detail='feature', tooltip=['feature', 'name', 'description'],
         features=None,
-        n=50, select_from_round=None,
-        selector=None, feature_scale=None):
+        n=50, 
+        selector=True, feature_scale=None):
     import altair as alt
-    # feature_scale = alt.Scale(domain=_features, range=[hash_to_color(f) for f in _features])
+    from altair import datum
+    
+    identifier = get_identifier(space)
+    
+    # identify selections from query
+    df = fortify(ex.query(query, space=space), obs=True, relative=True)
+    selections = df['name'].unique()
 
-    df = fortify_top_asvs(ft, query, n=n, select_from_round=select_from_round)
+    # calculate or retrieve enrichment; subset to indicated selections
+    enr = ex.enr(space, comparison=('start','end'), add_start_end=True, add_log=True)[['name', identifier,'log_enrichment']]
+    enr = enr.loc[enr['name'].isin(set(selections)), :]
 
+    # calculate geometric mean enrichment per feature
+    mean_log_enr = enr.groupby(identifier)['log_enrichment'].mean().rename('mean_log_enrichment')
+    
+    # if no features are given, choose top n features w/ highest geometric mean enrichment in query subset to show
+    if features is None:
+        features = mean_log_enr.sort_values(ascending=False)[:n].index.values
+
+    df_enr = df.join(enr.set_index(['name', identifier]), on=['name',identifier]).join(mean_log_enr, on=identifier)
+    
+    df_enr['feature'] = df_enr[identifier]
+
+    # click to focus on a feature, dim others
     _opacity = alt.value(1)
     if selector is not None:
+        if selector == True:
+            selector = alt.selection_point(fields=['feature'], bind='legend', on='click', clear='dblclick')        
         _opacity = alt.condition(selector, alt.value(1), alt.value(0.1))
-
-    if features is None:
-        features = df['feature'].unique()
 
     if feature_scale is None:
         feature_scale = alt_scale_features(features)
 
-    traceplot = alt.Chart(df).mark_line().encode(
+    
+    
+    traceplot = alt.Chart(df_enr).mark_line(point=True).encode(
         x=alt.X('r:O', title=None),
-        y=alt.Y('abundance:Q'),
-        color=alt.Color('feature:N', scale=feature_scale, sort="ascending"),
+        y=alt.Y('abundance:Q', scale=alt.Scale(type='log')),
+        color=alt.Color('feature:N', scale=feature_scale, 
+                        title=identifier,
+                        legend=alt.Legend(columns=n//10,symbolLimit=0,labelExpr="slice(datum.value,0,6)"),
+                        sort="ascending"),
         opacity=_opacity,
         detail=detail,
-        # tooltip=[
-        #     'feature:N',
-        #     'mn:N',
-        #     'description:N',
-        #     alt.Tooltip('enrichment:Q', format=".2g"),
-        #     alt.Tooltip('log_enrichment:Q', format=".2f")
-        # ],
+        tooltip=[
+            alt.Tooltip('feature:N', title=identifier),
+            alt.Tooltip('log_enrichment:Q', format=".2f", title='log10(enrichment)'),
+            alt.Tooltip('mean_log_enrichment:Q', format=".2f", title='mean(log10(enrichment))')
+        ],
 
         facet=alt.Facet('name:O', 
             title=None, 
             # header=alt.Header(labels=False, labelPadding=0, labelFontSize=0)
         )
-    ).properties(width=100, height=100).transform_filter(datum.feature != 'others').interactive()
+    ).properties(width=100, height=100).transform_filter(datum.feature != 'others').interactive(bind_y=True)
+
+    if selector is not None:
+        traceplot = traceplot.add_params(selector)
 
     return traceplot
 
@@ -450,7 +477,7 @@ def summarize_features(df, features=None, seq_col='CDR3', id_col='CDR3ID', max_f
     return table
 
 
-def compare_samples(ids_1, ids_2, ft, n=20, names=['1','2'], show_tables=True, **kwargs):
+def compare_samples(ids_1, ids_2, ft, metadata, n=20, names=['1','2'], show_tables=True, **kwargs):
     from ..distance import shared_reads, shared_reads_frac, shared_features
     from .utils import display_accordion, display_table
     from IPython.display import display
@@ -537,7 +564,7 @@ def compare_samples(ids_1, ids_2, ft, n=20, names=['1','2'], show_tables=True, *
 
     ft_top_shared = collapse_top_shared_asvs(ft, ids_1, ids_2, relative=True, n=n)
     df = fortify(ft_top_shared, obs=metadata, relative=False)
-    display(top_asv_plot(df, special_values={'unshared':"#aaaaaa", 'other shared': "#888888"}, facet='expt', **kwargs))
+    display(top_asv_barplot(df, special_values={'unshared':"#aaaaaa", 'other shared': "#888888"}, facet='expt', **kwargs))
 #     return res
 
     res = res.infer_objects()
