@@ -142,12 +142,16 @@ class Experiment:
 
 	def __repr__(self):
 		import textwrap
-		out = [f"Experiment('{self.name}') with layers:"]
+		out = [f"Experiment('{self.name}') with feature spaces {self.spaces}:"]
+		out.append(
+			textwrap.fill(
+				f"obs: {self.obs.columns.values}",
+				width=80, initial_indent="  ", subsequent_indent="    ")
+		)
 
 		for k, ft in self._fts.items():
 			out.append(f"- {k:<8}: {ft.shape[0]} samples x {ft.shape[1]} features, database: {self._mmseqs_dbs.get(k, 'None')}")
-			# out.append(f"	var: {ft.var.columns.values}")
-
+			
 			out.append(
 				textwrap.fill(
 					f"var: {ft.var.columns.values}", 
@@ -156,12 +160,6 @@ class Experiment:
 			if k in self._trees:
 				out.append(f"	tree: {repr(self._trees[k])}")
 
-		# out.append(f"	obs: {ft.obs.columns.values}")
-		out.append(
-			textwrap.fill(
-				f"obs: {ft.obs.columns.values}",
-				width=80, initial_indent="  ", subsequent_indent="    ")
-		)
 		out.append(f"SQL: {self._sql_db}")
 		return "\n".join(out)
 
@@ -294,26 +292,30 @@ class Experiment:
 		out = []
 		out.append(f"{len(em)} sub-experiment(s):")
 		for expt, row in em.iterrows():
-			out.append(f"- {expt}: {row['selections']} selections, {row['fewest_rounds_per_selection']} - {row['most_rounds_per_selection']} rounds per selection ({row['rounds']}), using libraries {row['phage_libraries']}")
+			if row['fewest_rounds_per_selection'] == row['most_rounds_per_selection']:
+				rounds = row['fewest_rounds_per_selection']
+			else:
+				rounds = f"{row['fewest_rounds_per_selection']} - {row['most_rounds_per_selection']}"
+			out.append(f"- {expt:<20}: {row['selections']:<8} selections, {rounds:<12} rounds per selection ({row['rounds']}), using libraries {row['phage_libraries']}")
 		return "\n".join(out)
 
 	def summarize_expts(self):
 		print(self._summarize_expts())
 
-	def summarize_selections(self):
+	def summarize_selections(self, cols=[]):
 		"""Print a summary of selection conditions represented by this experiment"""
 		key_cols = ['expt', 'phage_library', 'selection',
              'replicate', 'description', 'samples', 'rounds', 'antigens', 'notes']
 
-		display_or_print(self.selection_metadata[key_cols])
+		display_or_print(self.selection_metadata[key_cols + cols])
 		self._summarize_columns(self.selection_metadata.columns, key_cols)
 
-	def summarize_obs(self):
+	def summarize_obs(self, cols=[]):
 		"""Print a summary of samples represented by this experiment"""
 		key_cols = ['expt', 'phage_library', 'selection',
              'replicate', 'description', 'round', 'notes']
 
-		display_or_print(self.obs[key_cols])
+		display_or_print(self.obs[key_cols + cols])
 		self._summarize_columns(self.obs.columns, key_cols)
 
 	"""Calculate the probability of observing a given ``enrichment`` for some
@@ -562,7 +564,7 @@ class Experiment:
 
 
 	@staticmethod
-	def from_files(directory='.', metadata='config/metadata-phenotypes.csv',
+	def from_files(directory='.', metadata='config/metadata_full.csv',
                 phenotypes='config/phenotypes.csv',
                 config='config/config.yaml',
                 sql_db='intermediate/aa/asvs.db',
