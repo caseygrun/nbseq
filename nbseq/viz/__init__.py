@@ -99,13 +99,13 @@ class ExperimentVisualizer():
 	
 	def top_feature_barplot(self, query, space='cdr3', n=30, select_from_round=None, x='r:O', **kwargs):
 		from .sample import top_asv_barplot_alt
-		return top_asv_barplot_alt(self.fts[space], query, n=n, select_from_round=select_from_round, x=x, **kwargs)
+		return top_asv_barplot_alt(self.ex.fts[space], query, n=n, select_from_round=select_from_round, x=x, **kwargs)
 
 	def top_feature_traceplot(
         self, query, space='cdr3', tooltip=['feature', 'name', 'description'], features=None, n=50, **kwargs):
 		from .sample import top_feature_traceplot
 		
-		return top_feature_traceplot(self, query, space=space, tooltip=tooltip, features=None, n=n, selector=True, feature_scale=None)
+		return top_feature_traceplot(self.ex, query, space=space, tooltip=tooltip, features=None, n=n, selector=True, feature_scale=None)
 
 	def abundance_trace_plot(self, feature, space='cdr3', phenotype=None, facet=None, limits=None, title=None):
 		from ..ft import fortify
@@ -493,7 +493,11 @@ class ExperimentVisualizer():
 			self.ex.ags.reset_index()
 		)
 
-	def plot_selection_ag_matrix(self):
+	def plot_selection_ag_matrix(self, **kwargs):
+		"""Plot matrix of antigen assignments for all selections in the experiment.
+
+		See additional options at pheno.plot_ag_matrix
+		"""
 		from ..pheno import plot_ag_matrix
 		ex = self.ex
-		plot_ag_matrix([ex.selection_metadata[ex.ag_names]], ex.selection_metadata)
+		plot_ag_matrix([ex.selection_metadata[ex.ag_names]], ex.selection_metadata, **kwargs)

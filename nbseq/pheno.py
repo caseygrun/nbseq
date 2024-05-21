@@ -225,7 +225,7 @@ def summarize_phenotypes(metadata, phenotypes):
 
 
 def list_phenotypes(metadata, phenotypes):
-    from IPython.display import Markdown
+    from IPython.display import Markdown, display
 
     summary = pd.DataFrame(index=phenotypes.name, columns=[
                            'selections', 'rounds', 'pos', 'neg'])
@@ -285,12 +285,12 @@ def list_phenotypes(metadata, phenotypes):
     return summary
 
 
-def plot_ag_matrix(matrices, metadata, kws=None, labels=None, ax=None, figsize=None):
+def plot_ag_matrix(matrices, metadata, description_col='description', kws=None, labels=None, ax=None, figsize=None):
     from .viz.utils import trunc_ellipsis
     import matplotlib.pyplot as plt
     
     ag_matrix = matrices[0]
-    descriptions = metadata.reindex(ag_matrix.index)['description'].apply(trunc_ellipsis()).to_frame()
+    descriptions = metadata.reindex(ag_matrix.index)[description_col].apply(trunc_ellipsis()).to_frame()
     descriptions['x'] = range(len(descriptions))
     # descriptions
 
@@ -320,7 +320,7 @@ def plot_ag_matrix(matrices, metadata, kws=None, labels=None, ax=None, figsize=N
         ax.scatter(descriptions.loc[neg['name'], 'x'], neg['antigen'],
                    label=f'{label}-' if label is not None else '-', color='tab:blue', **kwargs)
 
-    ax.set_xticks(descriptions.x, descriptions.description, rotation=-90)
+    ax.set_xticks(descriptions.x, descriptions[description_col], rotation=-90)
     ax.legend()
 
 # fig, ax = plt.subplots(figsize=(30,20))
