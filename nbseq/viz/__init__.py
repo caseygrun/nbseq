@@ -161,35 +161,38 @@ class ExperimentVisualizer():
 	def plot_selections_for_feature(self, feature, space='cdr3', phenotype=None):
 		import altair as alt
 		from .utils import hash_to_mn_short, pretty_hex
+		from ..asvs import get_identifier
 
+		identifier = get_identifier(space)
 		sample_df = self.dfs[space].rename(columns={'p_value':'enr_p_value'})
 		ex = self.ex
 
-		df_abd = sample_df.query(f"CDR3ID == '{feature}' & kind == '+' & io == 'i'")[
-                ['CDR3ID', 'r', 'name', 'desc_short', 'abundance', 'enrichment', 'start', 'end', 'enr_p_value'] + list(ex.pheno_names)]
+		df_abd = sample_df.query(f"{identifier} == '{feature}' & kind == '+' & io == 'i'")[
+                [identifier, 'r', 'name', 'desc_short', 'abundance', 'enrichment', 'start', 'end', 'enr_p_value'] + list(ex.pheno_names)]
 
+		df_abd[list(ex.pheno_names)] = df_abd[list(ex.pheno_names)].fillna("?")
 
 		brush = alt.selection_interval(name='brush',
 			on="[mousedown[event.altKey], mouseup] > mousemove",
 			translate="[mousedown[event.altKey], mouseup] > mousemove")
 		dropdown = alt.binding_select(
-			options=['CDR3ID'] + list(ex.pheno_names),
+			options=[identifier] + list(ex.pheno_names),
 			name='Color by Phenotype'
 		)
 		phenotype_selector = alt.param(
 			name='phenotype_selector', 
-			value=(phenotype if phenotype is not None else 'CDR3ID'), 
+			value=(phenotype if phenotype is not None else identifier), 
 			bind=dropdown)
 
 
 		_phenotype_scale = alt.Scale(
-			domain=['NaN', -1, 0, 1], range=['#bab0ac', '#4c78a8', '#72b7b2', '#f58518'])
+			domain=['?', -1, 0, 1], range=['#bab0ac', '#4c78a8', '#72b7b2', '#f58518'])
 		chart_abd_trace = (
 			alt.Chart(df_abd).mark_line(point=True).encode(
 				x=alt.X('r:O'),
 				y=alt.Y('abundance:Q'),
 				color=alt.condition(
-					"phenotype_selector != 'CDR3ID'",
+					f"phenotype_selector != '{identifier}'",
 					alt.Color('grouping_color:N', title='Phenotype', scale=_phenotype_scale),
 					alt.value(hash_to_color(feature)),
 					# 'grouping_color:N'
@@ -231,7 +234,7 @@ class ExperimentVisualizer():
 			y=alt.Y('enrichment', scale=alt.Scale(type='log')),
 			tooltip=_tooltips,
 			color=alt.condition(
-				"phenotype_selector == 'CDR3ID'",
+				f"phenotype_selector == '{identifier}'",
 				alt.value(hash_to_color(feature)),
 				alt.Color('grouping_color:N', title='Phenotype',
 							scale=_phenotype_scale)
@@ -265,7 +268,7 @@ class ExperimentVisualizer():
 		return top_selections_table(feature, self.enr(space))
 
 	def summarize_top_samples(self, features, space='cdr3', relative=False, table=True, plot=True):
-		from .asv import sample_abundance_plot, top_samples_table
+		from .asv import sample_abundance_plot_alt, top_samples_table
 		from ..asvs import get_identifier
 
 		space = space.lower()
@@ -282,7 +285,7 @@ class ExperimentVisualizer():
 			from IPython.display import display
 			display(top_samples_table(features, fd=fd, relative=relative))
 		if plot:
-			sample_abundance_plot(features, fd=fd, relative=relative).draw(show=True)
+			return sample_abundance_plot_alt(features, fd=fd, relative=relative)
 
 
 	def summarize_clonotypes(self, cdr3s, sort_by=['CDR3'], ascending=True, other_columns=[], show_query=False, table=True, plot=True, **kwargs):
