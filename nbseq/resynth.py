@@ -1074,8 +1074,10 @@ class Cart:
                         )
                 elif not isinstance(overwrite, abc.Mapping):
                     raise ValueError("")
-
-            row = row.drop([identifier_col, antigen_col, description_col, overwrite_consensus_col])
+            
+            row = row.drop([identifier_col, antigen_col, description_col])
+            if overwrite_consensus_col in row:
+                row = row.drop([overwrite_consensus_col])
 
             self.add(
                 CDR3ID=_id,

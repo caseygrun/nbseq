@@ -157,3 +157,36 @@ def sample_abundance_plot(features, ft=None, fd=None, relative=False):
 		  p9.theme(axis_text_x=p9.element_blank())
 		 )
 	return gg
+
+
+def sample_abundance_plot_alt(features, ft=None, fd=None, relative=False):
+	"""plots absolute or relative abundance of a set of features across all samples
+	"""
+	import altair as alt
+
+	fd = fortify_feature_data(ft=ft, fd=fd, features=features, relative=(bool(relative) if relative != 'pre' else False), obs=True, sample_col='ID', feature_col='feature')
+
+
+	single_nearest = alt.selection_point(on="mouseover", fields=['selection'], nearest=True)
+
+	chart_hist = (
+		alt.Chart(fd).mark_bar().encode(
+			x=alt.X("abundance:Q", title="abundance", bin=True),
+			y=alt.Y('count()', title='# selections'),
+		) + (alt.Chart(fd).mark_tick().encode(
+				x=alt.X("abundance:Q"),
+				y=alt.value(0),
+				tooltip=[
+					alt.Tooltip('name_full'),
+					alt.Tooltip('abundance'),
+					alt.Tooltip('description'),
+				],
+				color=alt.condition(single_nearest, alt.value('#ff0000'), alt.value('#111')),
+				size=alt.condition(single_nearest, alt.value(20), alt.value(10))
+		).add_params(single_nearest))
+	).properties(height=50, width=200).facet(
+		row=alt.Facet("r:O", title="round"),
+		column=alt.Facet("feature", title="feature")
+	)#.interactive(bind_x=True)
+
+	return chart_hist

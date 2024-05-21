@@ -52,6 +52,7 @@ def _ordinate_decomposition(method_name, method_cls):
 
 def mds_eigs(A):
     """https://stackoverflow.com/a/40534620/4091874"""
+    import numpy.linalg as la
 
     # square it
     A = A**2

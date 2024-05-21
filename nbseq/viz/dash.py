@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import panel as pn
 import scipy.stats.mstats
 
-from ..utils import sample_metadata_to_selection_metadata, clamp_finite, replace_multiple
+from ..utils import sample_metadata_to_selection_metadata, clamp_finite, get_rounds, replace_multiple
 from ..ft import dataframe_to_anndata, to_relative, fortify, fortify_top_asvs, query as ft_query
 from .. import select as nbselect
 from ..asvs import get_identifier
@@ -15,7 +15,7 @@ from .utils import (
     hash_to_color, pretty_hex, pack_hex, hash_to_mn_short,
     buffer_to_figure, figure_to_buffer, sparkline, figure_to_sparkline,
     mini_histogram, plot_mini_histogram, plot_abundance_sparkline,
-    rug_bar
+    rug_bar,
 )
 
 from .sample import alt_scale_features
@@ -482,6 +482,23 @@ def enrichment_abundance_plot(df, selector, feature_scale, features=None):
     return enrabdplot
 
 
+# todo
+def SelectionGroupData():
+    def __init__(self,ft_pos, df_selections, df_samples, df_samples_top, df_features, df_enr_features, sel_fts_q, features):
+        self.ft_pos = ft_pos
+        self.df_selections = df_selections
+        self.df_samples = df_samples
+        self.df_samples_top = df_samples_top
+        self.df_features = df_features
+        self.df_enr_features = df_enr_features
+        self.sel_fts_q = sel_fts_q
+        self.features = features
+
+    @staticmethod
+    def _calculate(*args):
+        return SelectionGroupData(*_calculate_selection_group_dashboard_phenotype(*args))
+
+
 def _calculate_selection_group_dashboard_phenotype(
     ft, ft_enr, df_enr, sel_fts, pos_query, neg_query,
     feature_col, space, phenotype):
@@ -821,6 +838,7 @@ def selection_group_dashboard(ex,
         feature_col = get_identifier(space)
         ft = ex.query(global_query, space=space, axis='sample')
 
+        nonlocal rounds
         if rounds is None:
             rounds = get_rounds(ft.obs)
 
@@ -1170,7 +1188,7 @@ class FeatureData():
         self.df_sample = df_sample
         self.df_selection = df_selection
 
-    def subset(self,feature, ):
+    def subset(self, feature):
         identifier = get_identifier(self.space)
         return FeatureData(ft=self.ft, 
                            space=self.space,
@@ -1372,17 +1390,18 @@ def vhh_dashboard(
         show_histograms=True,
         show_traces=True,
         show_table=True,
+        starting_phenotype=None
         ):
 
     # setup
-    data = FeatureData.from_experiment(ex, global_query=global_query, space='cdr3', enr_comparison=enr_comparison, abbreviations=abbreviations)
+    full_data = FeatureData.from_experiment(ex, global_query=global_query, space='cdr3', enr_comparison=enr_comparison, abbreviations=abbreviations)
 
     # pre-build cache of histograms; for each sample, hist of feature enrichments
-    sample_enr_dist_buffers = data.df_enr.groupby(
+    sample_enr_dist_buffers = full_data.df_enr.groupby(
         'name')['log_enrichment'].apply(plot_dist_buffer)
     
     def make_vhh_dashboard(feature):
-        data = data.subset(feature)
+        data = full_data.subset(feature)
 
         if len(data.df_enr) == 0:
             return pn.pane.Alert((
@@ -1478,13 +1497,14 @@ def vhh_dashboard(
             return tag(feature, space=space)
 
         overview = pn.pane.Vega(feature_selection_overview(
-            feature), debounce=1000, show_actions=True)
+            feature, data, starting_phenotype=starting_phenotype), debounce=1000, show_actions=True)
         
         nonlocal show_table
         if show_table:
-            table = feature_selection_table(feature, 
-                            show_histograms=show_histograms,
-                            show_traces=show_traces)
+            table = feature_selection_table(
+                feature, data,
+                show_histograms=show_histograms,
+                show_traces=show_traces)
 
         def filter_table(df, selection):
             if selection is None or len(selection) == 0:

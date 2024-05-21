@@ -4,7 +4,7 @@ from plotnine import *
 from ..ft import *
 from .asv import hash_to_color, pretty_hex, pack_hex
 from .utils import contrasting_color
-
+from ..asvs import get_identifier
 
 import anndata
 from anndata import AnnData
@@ -96,6 +96,8 @@ def alt_scale_features(features, sort=False, **kwargs):
     if sort:
         features = sorted(features)
 
+    
+
     return alt.Scale(domain=features, range=[hash_to_color(f) for f in features])
 
 
@@ -127,6 +129,126 @@ def top_asv_barplot(df, special_values={'others':"#aaaaaa"}, limits=None, x='r',
         gg = gg + p9.ggtitle(title)
     return gg
 
+def top_asv_barplot_alt(ft, query, n=30, select_from_round=8, x='r:O', fancy_sorting=False, phylo=False, **kwargs):
+    import altair as alt
+
+    df = fortify_top_asvs(ft, query, n=n, select_from_round=select_from_round)
+    
+    # establish sorting order for features; sort by geometric mean abundance 
+    # across all samples in query
+    df['log_abundance'] = np.log10(df['abundance'])
+    features_by_mean_abundance = (df.groupby('feature')
+                                  ['log_abundance'].mean()
+                                  .rename('mean_log_abundance')
+                                  .sort_values(ascending=False))
+    
+    # attach to df so we can use this for sorting bars
+    df = df.join(features_by_mean_abundance, on='feature')
+    
+    if phylo:
+        raise NotImplementedError()
+    else: 
+        _features = features_by_mean_abundance.index.values
+        selector = alt.selection_point(fields=['feature'], bind='legend', on='click', clear='dblclick')
+        feature_scale = alt.Scale(domain=_features, 
+                                  range=[hash_to_color(f) for f in _features])
+        
+        return (alt.Chart(df)
+         .mark_bar()
+             .encode(x=x, 
+                     y='abundance', 
+                     tooltip=[
+                         'feature',
+                         alt.Tooltip('abundance', format=".2g"),
+                         alt.Tooltip('log_abundance', format=".2f")],
+                     opacity=alt.condition(selector, alt.value(1), alt.value(0.1)),
+                     # order=(alt.Order('mean_log_abundance',sort='ascending') if fancy_sorting else None),
+                     color=alt.Color('feature:N',
+                                     legend=alt.Legend(columns=n//20,symbolLimit=0,labelExpr="slice(datum.value,0,6)"),
+                                     scale=feature_scale,
+                                     # sort=(_features if fancy_sorting else None)
+                                    ))
+         # .facet(column='description')
+        .add_params(selector)
+        )
+
+def top_asv_barplot_hist(ex, query, n=100, space='cdr3', select_from_round=8, x='r:O'):
+    import altair as alt
+    from altair_transform import transform_chart
+
+    # df2 = fortify_top_asvs(ex,query='True', n=n)
+    df = fortify_top_asvs(ex, query, space, n=n, select_from_round=select_from_round)
+    
+    # establish sorting order for features; sort by geometric mean abundance 
+    # across all samples in query
+    df['log_abundance'] = np.log10(df['abundance'])
+    features_by_mean_abundance = (df.groupby('feature')
+                                  ['log_abundance'].mean()
+                                  .rename('mean_log_abundance')
+                                  .sort_values(ascending=False))
+    
+    # attach to df so we can use this for sorting bars
+    df = df.join(features_by_mean_abundance, on='feature')
+    
+    df2_features = list(set(ex.fts[space].var_names).intersection(features_by_mean_abundance.index.values))
+    
+    
+    df2 = fortify(ex.fts[space][:,df2_features], feature_col='feature')
+    df2['log_abundance'] = np.log10(df2['abundance'])
+
+
+    # _features = pd.concat([df['feature'], df2['feature']]).unique()
+    _features = list(features_by_mean_abundance.index.values)# + ['others']
+    feature_scale = alt.Scale(domain=_features, range=[hash_to_color(f) for f in _features])
+    
+    selector = alt.selection_point(fields=['feature'], bind='legend', on='click', clear='dblclick')
+    # selector = alt.selection_point(fields=['feature'])
+    
+    bar_chart = (alt.Chart(df)
+     .mark_bar()
+         .encode(x=x, 
+                 y='abundance', 
+                 tooltip=[
+                     # 'feature',
+                     # alt.Tooltip('feature', labelExpr="slice(datum.value,0,6) + ' ' + slice(datum.value,6)"),
+                     'feature',
+                     alt.Tooltip('abundance', format=".2g"),
+                     alt.Tooltip('log_abundance', format=".2f", title='log10(abundance)')],
+#                  color=alt.condition(
+#                     selector,
+#                     'feature:N',
+#                     alt.value('lightgray'),
+
+#                     legend=alt.Legend(columns=3,symbolLimit=0),
+#                     scale=feature_scale
+#                  )),
+                 color=alt.Color(
+                    'feature:N',
+                    legend=alt.Legend(columns=n//20,symbolLimit=0, 
+                                      labelExpr="slice(datum.value,0,6)"
+                                     ),
+                    scale=feature_scale, 
+                 ),                 
+                 opacity=alt.condition(selector, alt.value(1), alt.value(0.1))
+                )
+     .add_params(selector)
+    )
+
+    feature_hist = alt.Chart(df2).mark_bar().encode(
+        alt.X('log_abundance', bin=True),
+        y=alt.Y('count()', title='# samples', stack=None),
+        fill=alt.Fill('feature', scale=feature_scale),
+        tooltip=['feature'],
+        opacity=alt.condition(selector, alt.value(1), alt.value(0.01))
+    )
+    feature_hist_t = transform_chart(feature_hist).add_params(selector)
+    # .transform_filter(
+    #     selector
+    # )
+
+    return bar_chart | feature_hist_t    
+    
+
 def top_asv_lineplot(
     df, special_values={'others':"#aaaaaa"}, limits=None, x='r', facet=None, title=None,
     figsize=(12,8), **kwargs):
@@ -146,7 +268,72 @@ def top_asv_lineplot(
         gg = gg + p9.ggtitle(title)
     return gg
 
+def top_feature_traceplot(
+        ex, query, space='cdr3', detail='feature', tooltip=['feature', 'name', 'description'],
+        features=None,
+        n=50, 
+        selector=True, feature_scale=None):
+    import altair as alt
+    from altair import datum
+    
+    identifier = get_identifier(space)
+    
+    # identify selections from query
+    df = fortify(ex.query(query, space=space), obs=True, relative=True)
+    selections = df['name'].unique()
 
+    # calculate or retrieve enrichment; subset to indicated selections
+    enr = ex.enr(space, comparison=('start','end'), add_start_end=True, add_log=True)[['name', identifier,'log_enrichment']]
+    enr = enr.loc[enr['name'].isin(set(selections)), :]
+
+    # calculate geometric mean enrichment per feature
+    mean_log_enr = enr.groupby(identifier)['log_enrichment'].mean().rename('mean_log_enrichment')
+    
+    # if no features are given, choose top n features w/ highest geometric mean enrichment in query subset to show
+    if features is None:
+        features = mean_log_enr.sort_values(ascending=False)[:n].index.values
+
+    df_enr = df.join(enr.set_index(['name', identifier]), on=['name',identifier]).join(mean_log_enr, on=identifier)
+    
+    df_enr['feature'] = df_enr[identifier]
+
+    # click to focus on a feature, dim others
+    _opacity = alt.value(1)
+    if selector is not None:
+        if selector == True:
+            selector = alt.selection_point(fields=['feature'], bind='legend', on='click', clear='dblclick')        
+        _opacity = alt.condition(selector, alt.value(1), alt.value(0.1))
+
+    if feature_scale is None:
+        feature_scale = alt_scale_features(features)
+
+    
+    
+    traceplot = alt.Chart(df_enr).mark_line(point=True).encode(
+        x=alt.X('r:O', title=None),
+        y=alt.Y('abundance:Q', scale=alt.Scale(type='log')),
+        color=alt.Color('feature:N', scale=feature_scale, 
+                        title=identifier,
+                        legend=alt.Legend(columns=n//10,symbolLimit=0,labelExpr="slice(datum.value,0,6)"),
+                        sort="ascending"),
+        opacity=_opacity,
+        detail=detail,
+        tooltip=[
+            alt.Tooltip('feature:N', title=identifier),
+            alt.Tooltip('log_enrichment:Q', format=".2f", title='log10(enrichment)'),
+            alt.Tooltip('mean_log_enrichment:Q', format=".2f", title='mean(log10(enrichment))')
+        ],
+
+        facet=alt.Facet('name:O', 
+            title=None, 
+            # header=alt.Header(labels=False, labelPadding=0, labelFontSize=0)
+        )
+    ).properties(width=100, height=100).transform_filter(datum.feature != 'others').interactive(bind_y=True)
+
+    if selector is not None:
+        traceplot = traceplot.add_params(selector)
+
+    return traceplot
 
 def top_asv_plot_phylo(
     df, tree, special_values={'others':"#aaaaaa"}, limits=None, x='r', facet=None, title=None,
@@ -290,7 +477,7 @@ def summarize_features(df, features=None, seq_col='CDR3', id_col='CDR3ID', max_f
     return table
 
 
-def compare_samples(ids_1, ids_2, ft, n=20, names=['1','2'], show_tables=True, **kwargs):
+def compare_samples(ids_1, ids_2, ft, metadata, n=20, names=['1','2'], show_tables=True, **kwargs):
     from ..distance import shared_reads, shared_reads_frac, shared_features
     from .utils import display_accordion, display_table
     from IPython.display import display
@@ -377,7 +564,7 @@ def compare_samples(ids_1, ids_2, ft, n=20, names=['1','2'], show_tables=True, *
 
     ft_top_shared = collapse_top_shared_asvs(ft, ids_1, ids_2, relative=True, n=n)
     df = fortify(ft_top_shared, obs=metadata, relative=False)
-    display(top_asv_plot(df, special_values={'unshared':"#aaaaaa", 'other shared': "#888888"}, facet='expt', **kwargs))
+    display(top_asv_barplot(df, special_values={'unshared':"#aaaaaa", 'other shared': "#888888"}, facet='expt', **kwargs))
 #     return res
 
     res = res.infer_objects()
