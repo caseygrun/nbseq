@@ -1,24 +1,135 @@
-Library for processing nanobody (VHH) sequencing data.
+Library for processing nanobody (V~H~H) sequencing data.
 
-This package is intended to be used by the `nbseq-workflow`, a Snakemake workflow for processing raw sequencing from Phage-seq experiments into feature tables. This package can then be used interactively to query, calculate, and visualize the resulting data structures.
+This package is intended to be used in two ways:
+
+1) by the Snakemake workflows in the [`phage-seq` repository](http://github.com/caseygrun/phage-seq) to batch process raw sequencing data from Phage-seq experiments into feature tables. For this usage, the Snakemake workflows will install `nbseq` automatically as needed at the appropriate steps/ 
+
+2) interactively within Jupyter notebooks to query, calculate, and visualize the resulting data structures.
+
+## Installation and usage
+
+1) First, perform preprocessing of raw data using the Snakemake workflow(s) in the [`phage-seq` repository](http://github.com/caseygrun/phage-seq), following instructions there. The relevant steps within the Snakemake workflows will install the `nbseq` package; it is not necessary to manually install the `nbseq` package for this step.
+
+2) Second, for interactive analysis, it is recommended to create a dedicated `conda` environment for use with the `nbseq` package. 
+
+    a. If you have not already done so, install the [Mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html#mamba-install) (or [Conda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html)) package manager. I recommend using the [`miniforge`](https://github.com/conda-forge/miniforge) distribution. 
+    b. Create and activate a new `conda` environment for `nbseq` and its dependencies. You have two options:
+
+        - Minimal installation: installs only the required core dependencies:
+
+                wget https://github.com/caseygrun/nbseq/raw/main/environment-min.yaml
+                conda env create -f environment-min.yaml
+                conda activate nbseq-min
+
+        - Full installation of all optional dependencies:
+
+                wget https://github.com/caseygrun/nbseq/raw/main/environment.yaml
+                conda env create -f environment.yaml
+                conda activate nbseq
+
+        In both cases, you do not need to clone this repository. You only need to download the `.yaml` file(s) using the steps above; the remaining files will be downloaded and installed by `conda`. 
+
+    c. [Install JupyterLab](https://jupyterlab.readthedocs.io/en/stable/getting_started/installation.html#conda) or the Jupyter Notebook, if you have not already; you also have two choices for this:
+
+        - I recommend creating a separate dedicated `conda` environment for JupyterLab and using the [`nb_conda_kernels`](https://github.com/anaconda/nb_conda_kernels) package; this will allow you to install and update JupyterLab separately from `nbseq` and its many dependencies; the `nb_conda_kernels` package lets you access the `nbseq` environment (and any other conda environments you create) from within JupyterLab:
+        
+                conda deactivate 
+                conda create -n jupyter jupyterlab nb_conda_kernels panel
+                conda activate jupyter
+
+        - Alternatively, you can install JupyterLab directly into the same environment as `nbseq`:
+        
+                conda install jupyterlab
+
+    d. Launch JupyterLab and follow the instructions below in "Usage:"
+
+            jupyter lab
+
+
+Note: `nbseq` is tested only on 64-bit Linux.
+
+## Usage
+
+The main entry point for interactive analysis is the `nbseq.Experiment` class, which loads and organizes feature tables, phylogenetic trees, metadata, and databases for a given experiment. `nbseq.Experiment.from_files` can load data from the directory structure created by the [`phage-seq`](http://github.com/caseygrun/phage-seq) Snakemake workflows. Consult the docstring `?nbseq.Experiment.from_files` for a more detailed description of the options.
+
+
+    >>> import nbseq
+    >>> ex = nbseq.Experiment.from_files(
+    ...     # skip loading the larger `aa` (e.g. each VHH amino acid sequence is a 
+    ...     # distinct column) feature table and # phylogenetic tree; by default, 
+    ...     # the function loads the `cdr3` and `aa` feature tables
+    ...     ft_aa=None, tree_aa=None, 
+    ...     metadata='config/metadata_full.csv') #'intermediate/cdr3/features/all/alpaca/asvs.nwk')
+    Loading experiment CG026n from '/gpfs/ysm/project/kazmierczak/cng2/CG_D/CG026n/CG026n'...
+    - Reading metadata from config/metadata_full.csv ...
+    - Reading feature data for table 'cdr3' from intermediate/cdr3/features/all/asvs.csv ...
+    - Reading phenotypes from config/phenotypes.csv ...
+    - Reading Config from config/config.yaml ...
+    - Warning: sqlite database '/gpfs/ysm/project/kazmierczak/cng2/CG_D/CG026n/CG026n/intermediate/aa/asvs.db' does not exist
+    - Warning: mmseqs2 database 'aa' at 'intermediate/aa/features_db/features' does not exist!
+    - Warning: mmseqs2 database 'cdr3' at 'intermediate/cdr3/features_db/features' does not exist!
+    - Reading CDR3 phylogeny from intermediate/cdr3/features/all/alpaca/msa.nwk (428.2 kB)...
+    - Reading AA feature table from results/tables/aa/feature_table.biom (350.4 MB)...
+    - Reading CDR3 feature table from results/tables/cdr3/feature_table.biom (8.4 MB)...
+    Finished in 19.48 seconds
+
+
+Displaying the `Experiment` object shows a summary:
+
+    >>> ex
+    Experiment('CG026n') with layers:
+    - aa      : 439 x 5134305, database: intermediate/aa/features_db/features
+        var: []
+    - cdr3    : 439 x 40292, database: intermediate/cdr3/features_db/features
+        var: ['CDR3' 'library' 'reads' 'nsamples']
+        obs: ['plate.x' 'well.x' 'depth' 'expt' 'round' 'sample' 'phage_library'
+     'notes' 'r' 'io' 'kind' 'selection' 'replicate' 'name_full' 'name'
+     'well_027e' 'sel_plate_027i' 'sel_well_027i' 'selection_027j' 'plate.y'
+     'well.y' 'category' 'antigen' 'genotype_pair' 'gene_CS' 'gene_S'
+     'genotype_CS' 'background_CS' 'strain_CS' 'loc_CS' 'cond_CS' 'genotype_S'
+     'background_S' 'strain_S' 'loc_S' 'cond_S' 'cond_notes' 'bflm' 'swim'
+     'twitch' 'swarm' 'PMB-R' 'FEP-R' 'TET-R' 'CIP-R' 'CHL-R' 'GEN-R' 'ERY-R'
+     'IPM-R' 'cdiGMP' 'FliC' 'FliCa' 'FliCb' 'FlgEHKL' 'PilQ' 'PilA' 'PilB'
+     'LasA' 'LasB' 'Apr' 'XcpQ' 'ToxA' 'EstA' 'LepA' 'PlpD' 'Phz' 'Pcn' 'Pvd'
+     'Hcn' 'Rhl' 'T3SS' 'T6SS' 'Pel' 'Psl' 'CdrB' 'SCV' 'Mucoid' 'Alginate'
+     'OprM' 'OprJ' 'OprN' 'OprOP' 'OpdH' 'OprD' 'OprL' 'OprF' 'OprG' 'OprH'
+     'OprB' 'MexAB' 'MexCD' 'MexEF' 'MexJK' 'MexXY' 'MexGHI' 'PirA' 'Pfu'
+     'TonB' 'FptA' 'FpvA' 'PfeA' 'CupB5' 'CupA' 'CupB' 'CupC' 'CupD'
+     'LPS-LipidA-Palmitoyl' 'L-LipidA-Ara4N' 'LPS-CPA' 'LPS-OSA' 'LPS-galU'
+     'LPS-rough' 'LPS' 'description']
+    SQL: sqlite:////gpfs/ysm/project/kazmierczak/cng2/CG_D/CG026n/CG026n/intermediate/aa/asvs.db
+
+
+From there, you can load interactive visualizations using the `nbseq.viz` package, e.g.
+
+    >>> import nbseq.viz.dash
+    >>> nbseq.viz.dash.selection_group_dashboard(
+    ...     ex, starting_phenotype='OprM', 
+    ...     global_query=(
+    ...         "expt == '027j' & io == 'i' & kind == '+' & "
+    ...         f"~(name_full in {bad_samples_oprM})")
+    ... )
+
 
 ## Package organization
 
-- `nbseq`: `Experiment` class that collects and organizes data for a given experiment
+The `nbseq` package contains the following sub-modules:
+
+- `nbseq`: `Experiment` class that collects and organizes data for one or more Phage-seq experiments. Namely, `Experiment` loads and organizes trees, metadata, and feature tables in multiple feature spaces (e.g. VHH, CDR3, etc.) and facilitates projecting between them. `Experiment` also provides an interface for interactive visualization of the entire experiment or subsets thereof.
 - `utils`: utility functions
-- `asvs`: process VHH sequences
-- `ft`: read and process feature tables (sparse matrices of sample x feature [i.e. VHH, CDR3, etc.])
-- `select`: perform calculations relevant to phage display selection (e.g. enrichment, amplification bias)
-- `resynth`: choose and resynthesize recombinant VHH genes as fragments
+- `asvs`: process VHH sequences: calculate residue frequencies, consensus sequences, query for similar sequences, project between feature spaces (e.g. CDR3 counts to full length amino acid sequence counts)
+- `ft`: read and process feature tables (sparse matrices of _sample_ x _feature_ [i.e. VHH, CDR3, etc.])
+- `select`: perform calculations relevant to phage display selection (e.g. enrichment, amplification bias); calculate null models of enrichment probabilities
 - `norm`: normalize feature table data to remove effect of variable library sizes
-- `prep`: utilities to aid in sample preparation
 - `ordination`: perform ordination/dimensionality reduction on feature tables
-- `predict`: machine learning prediction on feature tables
-- `cloning`: simulate cloning recombinant VHHs into destination vectors
 - `design`: create design matrices for inference and machine learning
 - `pheno`: compare and visualize phenotypes of samples
-- `msa`: perform multiple sequence alignment
-- `viz`: visualization
+- `msa`: perform multiple sequence alignment with `mafft`
+- `viz`: generate various visualizations: feature bar plots, rank-abundance curve (Whittaker plots), abundance curves, 2D/3D ordination plots, sequence logos, receiver-operator characteristic curves, etc.
+- `predict`: perform machine learning prediction on feature tables
+- `resynth`: choose and resynthesize recombinant VHH genes as gene fragments. Includes routines for identifying consensus sequences, trimming and adding adapter sequences, etc. 
+- `cloning`: simulate cloning recombinant VHHs into destination vectors
+- `prep`: utilities to aid in HTS library preparation
 
 ## Dependencies
 

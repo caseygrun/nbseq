@@ -20,31 +20,35 @@ if TYPE_CHECKING:
 class LibraryConfig(dotdict):
 	"""Configuration object for a given phage display library"""
 
-	"""Forward primer sequence"""
+	"""Forward primer sequence (5' to 3'); used in the `cutadapt` preprocessing step to identify reads corresponding to properly-prepared amplicons"""
 	primer_fwd = ""
 	
-	"""Reverse primer sequence"""
+	"""Reverse primer sequence (5' to 3'); used in the `cutadapt` preprocessing step to identify reads corresponding to properly-prepared amplicons"""
 	primer_rev = ""
 
-	"""Path to reference sequence in FASTA format"""
+	"""Path to the reference sequence, in FASTA format"""
 	reference = None
 
 	"""Nucleic acid position (0-based) indicating the first base of the first codon of the reference sequence"""
 	reference_frame_start_nt = 0
 	
 	"""Length of the reference sequence in amino acids; if the reference 
-	sequence is longer than (reference_frame_start_nt + (reference_length_aa * 3)), it will be trimmed.
+	sequence is longer than (reference_frame_start_nt + (reference_length_aa * 3)) nt, it will be trimmed.
 	"""
 	reference_length_aa = 0
 
 
-	"""3' (distal) end of forward read must align to this NA position or later"""
+	"""3' (distal) end of the forward read must align to this NA position or 
+	later; position 0 is the first base of the reference sequence, irrespective
+	of :py:attr:`reference_frame_start_nt`."""
 	min_fwd_end = 0
 
-	"""3' (distal) end of reverse read must align to this NA position or earlier"""
+	"""3' (distal) end of reverse read must align to this NA position or 
+	earlier; position 0 is the first base of the reference sequence, irrespective
+	of :py:attr:`reference_frame_start_nt`."""
 	max_rev_start = 0
 
-	"""Features where the aligned amino acid sequence (excluding gap characters)
+	"""Reads where the aligned amino acid sequence (excluding gap characters)
 	are shorter than this length will be dropped"""
 	min_aa_length = 69
     
@@ -70,7 +74,7 @@ class LibraryConfig(dotdict):
 	"""
 	CDRs = {}
 
-	"""Features with CDR or FR regions shorter than this length (in amino acids)
+	"""Reads with CDR or FR regions shorter than this length (in amino acids)
 	will be dropped. Dict where keys are domain names (e.g. 'CDR1', 'FR2', etc.
 	and should correspond to domains defined in :py:attr:`CDRs`) and values are 
 	minimum lengths (in amino acids)"""
@@ -439,6 +443,9 @@ class Experiment:
 
 		from .asvs import find_similar_features
 		space = space.lower()
+		if space not in self._mmseqs_dbs[space]:
+			raise ValueError(f"mmseqs2 db is required to search for similar features but is missing for space '{space}'; re-generate using snakemake: \n"
+					f"snakemake -j1 --use-conda -- intermediate/{space}/features_db")
 		return find_similar_features(query,
 			ft=self.fts[space],
 			db=self._mmseqs_dbs[space],
