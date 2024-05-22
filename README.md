@@ -8,12 +8,12 @@ This package is intended to be used in two ways:
 
 ## Installation and usage
 
-1) First, perform preprocessing of raw data using the Snakemake workflow(s) in the [`phage-seq` repository](http://github.com/caseygrun/phage-seq), following instructions there. The relevant steps within the Snakemake workflows will install the `nbseq` package; it is not necessary to manually install the `nbseq` package for this step.
+1. First, perform preprocessing of raw data using the Snakemake workflow(s) in the [`phage-seq` repository](http://github.com/caseygrun/phage-seq), following instructions there. The relevant steps within the Snakemake workflows will install the `nbseq` package; it is not necessary to manually install the `nbseq` package for this step.
 
-2) Second, for interactive analysis, it is recommended to create a dedicated `conda` environment for use with the `nbseq` package. 
+2. Second, for interactive analysis, it is recommended to create a dedicated `conda` environment for use with the `nbseq` package. 
 
-    a. If you have not already done so, install the [Mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html#mamba-install) (or [Conda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html)) package manager. I recommend using the [`miniforge`](https://github.com/conda-forge/miniforge) distribution. 
-    b. Create and activate a new `conda` environment for `nbseq` and its dependencies. You have two options:
+    1.  If you have not already done so, install the [Mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html#mamba-install) (or [Conda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html)) package manager. I recommend using the [`miniforge`](https://github.com/conda-forge/miniforge) distribution. 
+    2.  Create and activate a new `conda` environment for `nbseq` and its dependencies. You have two options:
 
         - Minimal installation: installs only the required core dependencies:
 
@@ -29,7 +29,7 @@ This package is intended to be used in two ways:
 
         In both cases, you do not need to clone this repository. You only need to download the `.yaml` file(s) using the steps above; the remaining files will be downloaded and installed by `conda`. 
 
-    c. [Install JupyterLab](https://jupyterlab.readthedocs.io/en/stable/getting_started/installation.html#conda) or the Jupyter Notebook, if you have not already; you also have two choices for this:
+    3.  [Install JupyterLab](https://jupyterlab.readthedocs.io/en/stable/getting_started/installation.html#conda) or the Jupyter Notebook, if you have not already; you also have two choices for this:
 
         - I recommend creating a separate dedicated `conda` environment for JupyterLab and using the [`nb_conda_kernels`](https://github.com/anaconda/nb_conda_kernels) package; this will allow you to install and update JupyterLab separately from `nbseq` and its many dependencies; the `nb_conda_kernels` package lets you access the `nbseq` environment (and any other conda environments you create) from within JupyterLab:
         
@@ -41,7 +41,7 @@ This package is intended to be used in two ways:
         
                 conda install jupyterlab
 
-    d. Launch JupyterLab and follow the instructions below in "Usage:"
+    4.  Launch JupyterLab and follow the instructions below in "Usage:"
 
             jupyter lab
 
@@ -60,56 +60,62 @@ The main entry point for interactive analysis is the `nbseq.Experiment` class, w
     ...     # the function loads the `cdr3` and `aa` feature tables
     ...     ft_aa=None, tree_aa=None, 
     ...     metadata='config/metadata_full.csv') #'intermediate/cdr3/features/all/alpaca/asvs.nwk')
-    Loading experiment CG026n from '/gpfs/ysm/project/kazmierczak/cng2/CG_D/CG026n/CG026n'...
+    Loading experiment panning-extended from '/vast/palmer/home.mccleary/cng2/code/phageseq-paper/panning-extended'...
     - Reading metadata from config/metadata_full.csv ...
-    - Reading feature data for table 'cdr3' from intermediate/cdr3/features/all/asvs.csv ...
     - Reading phenotypes from config/phenotypes.csv ...
     - Reading Config from config/config.yaml ...
-    - Warning: sqlite database '/gpfs/ysm/project/kazmierczak/cng2/CG_D/CG026n/CG026n/intermediate/aa/asvs.db' does not exist
-    - Warning: mmseqs2 database 'aa' at 'intermediate/aa/features_db/features' does not exist!
-    - Warning: mmseqs2 database 'cdr3' at 'intermediate/cdr3/features_db/features' does not exist!
-    - Reading CDR3 phylogeny from intermediate/cdr3/features/all/alpaca/msa.nwk (428.2 kB)...
-    - Reading AA feature table from results/tables/aa/feature_table.biom (350.4 MB)...
-    - Reading CDR3 feature table from results/tables/cdr3/feature_table.biom (8.4 MB)...
-    Finished in 19.48 seconds
+    - Using SQL database at 'sqlite:////vast/palmer/home.mccleary/cng2/code/phageseq-paper/panning-extended/intermediate/aa/asvs.db'
+    - Reading feature data for table 'cdr3' from results/tables/cdr3/asvs.csv (2.6 MB)...
+    - Reading aa feature table from results/tables/aa/feature_table.biom (350.4 MB)...
+    - Reading cdr3 feature table from results/tables/cdr3/feature_table.biom (8.4 MB)...
+    - Warning: phylogeny for space 'aa' at 'intermediate/aa/features/top_asvs/alpaca/asvs.nwk' does not exist!
+    - Warning: phylogeny for space 'cdr3' at 'intermediate/cdr3/features/top_asvs/alpaca/asvs.nwk' does not exist!
+    - Using mmseqs2 database 'aa' at 'intermediate/aa/features_db/features'
+    - Warning: mmseqs2 database for space 'cdr3' at 'intermediate/cdr3/features_db/features' does not exist!
+    - Reading enrichment model (conditional ECDF) for space cdr3 from results/tables/cdr3/enrichment/null/ecdf.pickle (307.6 kB)...
+    Finished in 20.29 seconds
 
 
 Displaying the `Experiment` object shows a summary:
 
     >>> ex
-    Experiment('CG026n') with layers:
-    - aa      : 439 x 5134305, database: intermediate/aa/features_db/features
-        var: []
-    - cdr3    : 439 x 40292, database: intermediate/cdr3/features_db/features
-        var: ['CDR3' 'library' 'reads' 'nsamples']
-        obs: ['plate.x' 'well.x' 'depth' 'expt' 'round' 'sample' 'phage_library'
-     'notes' 'r' 'io' 'kind' 'selection' 'replicate' 'name_full' 'name'
-     'well_027e' 'sel_plate_027i' 'sel_well_027i' 'selection_027j' 'plate.y'
-     'well.y' 'category' 'antigen' 'genotype_pair' 'gene_CS' 'gene_S'
-     'genotype_CS' 'background_CS' 'strain_CS' 'loc_CS' 'cond_CS' 'genotype_S'
-     'background_S' 'strain_S' 'loc_S' 'cond_S' 'cond_notes' 'bflm' 'swim'
-     'twitch' 'swarm' 'PMB-R' 'FEP-R' 'TET-R' 'CIP-R' 'CHL-R' 'GEN-R' 'ERY-R'
-     'IPM-R' 'cdiGMP' 'FliC' 'FliCa' 'FliCb' 'FlgEHKL' 'PilQ' 'PilA' 'PilB'
-     'LasA' 'LasB' 'Apr' 'XcpQ' 'ToxA' 'EstA' 'LepA' 'PlpD' 'Phz' 'Pcn' 'Pvd'
-     'Hcn' 'Rhl' 'T3SS' 'T6SS' 'Pel' 'Psl' 'CdrB' 'SCV' 'Mucoid' 'Alginate'
-     'OprM' 'OprJ' 'OprN' 'OprOP' 'OpdH' 'OprD' 'OprL' 'OprF' 'OprG' 'OprH'
-     'OprB' 'MexAB' 'MexCD' 'MexEF' 'MexJK' 'MexXY' 'MexGHI' 'PirA' 'Pfu'
-     'TonB' 'FptA' 'FpvA' 'PfeA' 'CupB5' 'CupA' 'CupB' 'CupC' 'CupD'
-     'LPS-LipidA-Palmitoyl' 'L-LipidA-Ara4N' 'LPS-CPA' 'LPS-OSA' 'LPS-galU'
-     'LPS-rough' 'LPS' 'description']
-    SQL: sqlite:////gpfs/ysm/project/kazmierczak/cng2/CG_D/CG026n/CG026n/intermediate/aa/asvs.db
+    Experiment('panning-extended') with feature spaces ['aa', 'cdr3']:
+    obs: ['plate.x' 'well.x' 'depth' 'expt' 'round' 'sample' 'phage_library'
+        'notes' 'r' 'io' 'kind' 'selection' 'replicate' 'name_full' 'name'
+        'well_027e' 'sel_plate_027i' 'sel_well_027i' 'selection_027j' 'plate.y'
+        'well.y' 'category' 'antigen' 'genotype_pair' 'gene_CS' 'gene_S'
+        'genotype_CS' 'background_CS' 'strain_CS' 'loc_CS' 'cond_CS' 'genotype_S'
+        'background_S' 'strain_S' 'loc_S' 'cond_S' 'cond_notes' 'bflm' 'swim'
+        'twitch' 'swarm' 'PMB-R' 'FEP-R' 'TET-R' 'CIP-R' 'CHL-R' 'GEN-R' 'ERY-R'
+        'IPM-R' 'cdiGMP' 'FliC' 'FliCa' 'FliCb' 'FlgEHKL' 'PilQ' 'PilA' 'PilB'
+        'LasA' 'LasB' 'Apr' 'XcpQ' 'ToxA' 'EstA' 'LepA' 'PlpD' 'Phz' 'Pcn' 'Pvd'
+        'Hcn' 'Rhl' 'T3SS' 'T6SS' 'Pel' 'Psl' 'CdrB' 'SCV' 'Mucoid' 'Alginate'
+        'OprM' 'OprJ' 'OprN' 'OprOP' 'OpdH' 'OprD' 'OprL' 'OprF' 'OprG' 'OprH'
+        'OprB' 'MexAB' 'MexCD' 'MexEF' 'MexJK' 'MexXY' 'MexGHI' 'PirA' 'Pfu'  'TonB'
+        'FptA' 'FpvA' 'PfeA' 'CupB5' 'CupA' 'CupB' 'CupC' 'CupD'  'LPS-LipidA-
+        Palmitoyl' 'L-LipidA-Ara4N' 'LPS-CPA' 'LPS-OSA' 'LPS-galU'  'LPS-rough'
+        'LPS' 'description']
+    - aa      : 439 samples x 5134305 features, database: None
+    var: ['reads' 'nsamples']
+    - cdr3    : 439 samples x 40292 features, database: None
+    var: ['reads' 'nsamples']
+    SQL: sqlite:////vast/palmer/home.mccleary/cng2/code/phageseq-paper/panning-extended/intermediate/aa/asvs.db
 
 
-From there, you can load interactive visualizations using the `nbseq.viz` package, e.g.
+From there, you can access various visualizations via the experiment visualizer, `ex.viz`, e.g.:
+
+    >>> ex.viz.top_feature_barplot(f"expt == '027j' & FlgEHKL == 1", select_from_round=None, n=100).facet(column='selection')
+
+Or load additional interactive visualizations using the `nbseq.viz` package, e.g.
 
     >>> import nbseq.viz.dash
     >>> nbseq.viz.dash.selection_group_dashboard(
-    ...     ex, starting_phenotype='OprM', 
+    ...     ex, starting_phenotype='FlgEHKL', 
     ...     global_query=(
-    ...         "expt == '027j' & io == 'i' & kind == '+' & "
-    ...         f"~(name_full in {bad_samples_oprM})")
+    ...         "expt == '027j' & io == 'i' & kind == '+'")
     ... )
 
+See the [`phage-seq` repository](http://github.com/caseygrun/phage-seq) for additional examples: [`panning-minimal`](http://github.com/caseygrun/phage-seq/panning-minimal/workflow/analysis.ipynb) and [`panning-extended`](http://github.com/caseygrun/phage-seq/panning-extended/workflow/analysis.ipynb).
 
 ## Package organization
 
