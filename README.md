@@ -1,10 +1,13 @@
-Library for processing nanobody (V~H~H) sequencing data.
+Library for processing nanobody (VHH) sequencing data.
 
 This package is intended to be used in two ways:
 
 1) by the Snakemake workflows in the [`phage-seq` repository](http://github.com/caseygrun/phage-seq) to batch process raw sequencing data from Phage-seq experiments into feature tables. For this usage, the Snakemake workflows will install `nbseq` automatically as needed at the appropriate steps/ 
 
 2) interactively within Jupyter notebooks to query, calculate, and visualize the resulting data structures.
+
+
+To explore the code used in our paper, start with the [`phage-seq` repository](http://github.com/caseygrun/phage-seq). That repository also includes several demonstration notebooks and datasets to explore the functionality of this library. Follow the instructions there to create or obtain an example dataset, then return to this repository for instructions on how to install `nbseq` for interactive analysis.
 
 ## Installation and usage
 
