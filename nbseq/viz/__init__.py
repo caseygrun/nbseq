@@ -98,12 +98,59 @@ class ExperimentVisualizer():
 	# 		sample_abundance_plot(features, fd=fd, relative=relative).draw(show=True)
 	
 	def top_feature_barplot(self, query, space='cdr3', n=30, select_from_round=None, x='r:O', **kwargs):
+		"""Show a barplot for each selection with one bar for each of the `n` most abundant features in the queried samples
+
+		See `viz.sample.top_asv_barplot_alt`
+
+		Parameters
+		----------
+		query : str
+			query to select a subset of samples in the experiment
+		space : str, optional
+			feature space, by default 'cdr3'
+		n : int, optional
+			number of features to show; all other features will be grouped into a bar labeled "others", by default 30
+		select_from_round : str, optional
+			choose the most abundant feature from which round?, by default will use the final round
+		x : str, optional
+			what to plot on the X axis should be shorthand specifier for an altair Chart, by default 'r:O' (e.g. the round number, plotted as an ordinal value)
+
+		Returns
+		-------
+		alt.Chart
+			plot
+		"""
 		from .sample import top_asv_barplot_alt
 		return top_asv_barplot_alt(self.ex.fts[space], query, n=n, select_from_round=select_from_round, x=x, **kwargs)
 
 	def top_feature_traceplot(
         self, query, space='cdr3', tooltip=['feature', 'name', 'description'], features=None, n=50, **kwargs):
+		"""Show abundance traces of the n features which are most enriched in a given group of selections
+
+		By default, selects features with the highest geometric mean enrichment
+
+		See `viz.sample.top_feature_traceplot`
+
+		Parameters
+		----------
+		query : str
+			Query to select a subset of samples
+		space : str, optional
+			feature space, should correspond to an entry in self.ex.spaces, by default 'cdr3'
+		tooltip : list, optional
+			columns to show in the tooltip, by default ['feature', 'name', 'description']
+		features : list of str, optional
+			_description_, by default None
+		n : int, optional
+			maximum number of features to show, by default 50
+
+		Returns
+		-------
+		alt.Chart
+			plot
+		"""
 		from .sample import top_feature_traceplot
+
 		
 		return top_feature_traceplot(self.ex, query, space=space, tooltip=tooltip, features=None, n=n, selector=True, feature_scale=None)
 
@@ -286,6 +333,26 @@ class ExperimentVisualizer():
 		return top_selections_table(feature, self.enr(space))
 
 	def summarize_top_samples(self, features, space='cdr3', relative=False, table=True, plot=True):
+		"""Show a summary of the samples where the given features are most abundant
+
+		Parameters
+		----------
+		features : list of str
+			feature identifiers, e.g. CDR3IDs
+		space : str, optional
+			feature space, by default 'cdr3'
+		relative : bool, optional
+			show relative abundances (abundances sum to 1), by default False
+		table : bool, optional
+			show a table of the most abundant samples, by default True
+		plot : bool, optional
+			plot a histogram of sample abundances per-round, by default True
+
+		Returns
+		-------
+		alt.Chart
+			plot
+		"""
 		from .asv import sample_abundance_plot_alt, top_samples_table
 		from ..asvs import get_identifier
 
