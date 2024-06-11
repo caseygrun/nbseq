@@ -832,90 +832,97 @@ def selection_group_dashboard(ex,
     def setup_selection_group_dashboard(global_query="kind == '+' & io == 'i'", space='cdr3'):
         """build dashboard for a selection group having selected a feature space and sample query"""
 
-        # setup full dataset
-        # --------------------------------------------------------
-        # subset feature table according to global_query
-        feature_col = get_identifier(space)
-        ft = ex.query(global_query, space=space, axis='sample')
+        import warnings
+        with warnings.catch_warnings():
+            from anndata import ImplicitModificationWarning
+            
+            warnings.simplefilter('ignore', RuntimeWarning)
+            warnings.simplefilter('ignore', ImplicitModificationWarning)
 
-        nonlocal rounds
-        if rounds is None:
-            rounds = get_rounds(ft.obs)
+            # setup full dataset
+            # --------------------------------------------------------
+            # subset feature table according to global_query
+            feature_col = get_identifier(space)
+            ft = ex.query(global_query, space=space, axis='sample')
 
-        # calculate enrichment df, add p-values and start/end abundance
-        df_enr = nbselect.enr(ft, method='df', comparison=enr_comparison,
-                                  dropna=True, 
-                                  add_start_end=True, 
-                                  add_rank=True,
-                                  add_log=True)
-        df_enr = nbselect.enrichment_pvalues(
-            df_enr, abundance_col=enr_comparison[0], inplace=True)
-        # df_enr = nbselect.enrichment_start_end(df_enr, inplace=True)
-        # df_enr = nbselect.enrichment_rank(df_enr, inplace=True)
+            nonlocal rounds
+            if rounds is None:
+                rounds = get_rounds(ft.obs)
 
-        if (feature_col not in df_enr.columns) and ('feature' in df_enr.columns):
-            df_enr[feature_col] = df_enr['feature']
+            # calculate enrichment df, add p-values and start/end abundance
+            df_enr = nbselect.enr(ft, method='df', comparison=enr_comparison,
+                                    dropna=True, 
+                                    add_start_end=True, 
+                                    add_rank=True,
+                                    add_log=True)
+            df_enr = nbselect.enrichment_pvalues(
+                df_enr, abundance_col=enr_comparison[0], inplace=True)
+            # df_enr = nbselect.enrichment_start_end(df_enr, inplace=True)
+            # df_enr = nbselect.enrichment_rank(df_enr, inplace=True)
 
-        # make several feature tables grouped by selection
-        sel_fts = {
-            col: dataframe_to_anndata(df_enr, obs=ex.selection_metadata, obs_col='name', var_col=feature_col, value_col=col) for col in ['enrichment', 'log_enrichment', 'sig', 'p_value', rounds[0], rounds[-1], 'start', 'end']
-        }
-        ft_enr = sel_fts['enr'] = sel_fts['enrichment']
-        sel_fts['pct'] = nbselect.calculate_enrichment_pct(ft_enr)
+            if (feature_col not in df_enr.columns) and ('feature' in df_enr.columns):
+                df_enr[feature_col] = df_enr['feature']
 
-        def setup_selection_group_dashboard_phenotype(
-            phenotype,
-            pos_query = "{phenotype} == 1",
-            neg_query = "({phenotype} == 0 | {phenotype} == -1)"):
-            import scipy.stats
+            # make several feature tables grouped by selection
+            sel_fts = {
+                col: dataframe_to_anndata(df_enr, obs=ex.selection_metadata, obs_col='name', var_col=feature_col, value_col=col) for col in ['enrichment', 'log_enrichment', 'sig', 'p_value', rounds[0], rounds[-1], 'start', 'end']
+            }
+            ft_enr = sel_fts['enr'] = sel_fts['enrichment']
+            sel_fts['pct'] = nbselect.calculate_enrichment_pct(ft_enr)
 
-            # setup subset
-            pos_query = pos_query.format(phenotype=phenotype)
-            neg_query = neg_query.format(phenotype=phenotype)
+            def setup_selection_group_dashboard_phenotype(
+                phenotype,
+                pos_query = "{phenotype} == 1",
+                neg_query = "({phenotype} == 0 | {phenotype} == -1)"):
+                import scipy.stats
 
-            # check that dataset contains >0 samples matching both pos_query and neg_query
-            if (len(ft.obs.query(pos_query))) < 1 or (len(ft.obs.query(neg_query)) < 1):
-                return pn.pane.Alert((
-                    "Bad phenotype:"
-                    f"{len(ft.obs.query(pos_query))} {phenotype}+ samples (query: `{pos_query}`) "
-                    f"{len(ft.obs.query(neg_query))} {phenotype}- samples (query: `{neg_query}`). "
-                    "Check global query and phenotype value.")
-                )
+                # setup subset
+                pos_query = pos_query.format(phenotype=phenotype)
+                neg_query = neg_query.format(phenotype=phenotype)
 
-            (ft_pos, df_selections, df_samples, df_samples_top, df_features, df_enr_features,
-             sel_fts_q, features) = _calculate_selection_group_dashboard_phenotype(
-                ft, ft_enr, df_enr, sel_fts, pos_query, neg_query, feature_col, space, phenotype)
+                # check that dataset contains >0 samples matching both pos_query and neg_query
+                if (len(ft.obs.query(pos_query))) < 1 or (len(ft.obs.query(neg_query)) < 1):
+                    return pn.pane.Alert((
+                        "Bad phenotype:"
+                        f"{len(ft.obs.query(pos_query))} {phenotype}+ samples (query: `{pos_query}`) "
+                        f"{len(ft.obs.query(neg_query))} {phenotype}- samples (query: `{neg_query}`). "
+                        "Check global query and phenotype value.")
+                    )
+
+                (ft_pos, df_selections, df_samples, df_samples_top, df_features, df_enr_features,
+                sel_fts_q, features) = _calculate_selection_group_dashboard_phenotype(
+                    ft, ft_enr, df_enr, sel_fts, pos_query, neg_query, feature_col, space, phenotype)
 
 
-            def make_samples_table():
-                return sample_metadata_to_selection_metadata(df_samples)            
+                def make_samples_table():
+                    return sample_metadata_to_selection_metadata(df_samples)            
 
-            overview = pn.pane.Vega(
-                _make_overview(df_samples_top, df_features, feature_col, 
-                               tree=(ex.tree[space] if space in ex.tree and tree else None),
-                               initial_selection=initial_selection
-                               ), 
-                debounce=1000, show_actions=True)
-            table = pn.panel(
-                _make_features_table(df_samples, df_features, df_enr_features,
-                                     features, feature_col,  sel_fts_q, n_jobs, 
-                                     rounds=rounds), loading_indicator=True)
+                overview = pn.pane.Vega(
+                    _make_overview(df_samples_top, df_features, feature_col, 
+                                tree=(ex.tree[space] if space in ex.tree and tree else None),
+                                initial_selection=initial_selection
+                                ), 
+                    debounce=1000, show_actions=True)
+                table = pn.panel(
+                    _make_features_table(df_samples, df_features, df_enr_features,
+                                        features, feature_col,  sel_fts_q, n_jobs, 
+                                        rounds=rounds), loading_indicator=True)
 
-            # def filter_table(df, selection):
-            #     if selection is None or len(selection) == 0:
-            #         return df
-            #     query = ' & '.join(
-            #         f'{crange[0]:.3f} <= `{col}` <= {crange[1]:.3f}'
-            #         for col, crange in selection.items()
-            #     )
-            #     return df.query(query)
+                # def filter_table(df, selection):
+                #     if selection is None or len(selection) == 0:
+                #         return df
+                #     query = ' & '.join(
+                #         f'{crange[0]:.3f} <= `{col}` <= {crange[1]:.3f}'
+                #         for col, crange in selection.items()
+                #     )
+                #     return df.query(query)
 
-            # table.add_filter(
-            #     pn.bind(filter_table, selection=overview.selection.param.brush))
-            return pn.Column(
-                overview, 
-                table, 
-                sizing_mode='stretch_width')
+                # table.add_filter(
+                #     pn.bind(filter_table, selection=overview.selection.param.brush))
+                return pn.Column(
+                    overview, 
+                    table, 
+                    sizing_mode='stretch_width')
 
         nonlocal starting_phenotype
         if starting_phenotype is None:
