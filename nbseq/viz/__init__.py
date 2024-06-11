@@ -158,7 +158,25 @@ class ExperimentVisualizer():
 			gg = gg + p9.ggtitle(title)
 		return gg
 
-	def plot_selections_for_feature(self, feature, space='cdr3', phenotype=None):
+	def plot_selections_for_feature(self, feature, space='cdr3', global_query="kind == '+' & io == 'i'", phenotype=None):
+		"""display an abundance plot and an enrichment-abundance plot showing the behavior of some feature across all selections
+
+		Parameters
+		----------
+		feature : str
+			identifier of the feature, e.g. CDR3ID, AASVID, etc.
+		space : str, optional
+			feature space; should correspond to an entry in self.ex.spaces, by default 'cdr3'
+		global_query : str, optional
+			query to restrict which samples are displayed, by default "kind == '+' & io == 'i'", i.e. only show post-amplification phage (io == 'i') from selection, not counter-selection cells (kind == '+').
+		phenotype : str, optional
+			How to color points by default; should correspond to an entry in self.ex.pheno_names; if omitted, will show all points in the feature color
+
+		Returns
+		-------
+		alt.Chart
+			plot
+		"""
 		import altair as alt
 		from .utils import hash_to_mn_short, pretty_hex
 		from ..asvs import get_identifier
@@ -167,7 +185,7 @@ class ExperimentVisualizer():
 		sample_df = self.dfs[space].rename(columns={'p_value':'enr_p_value'})
 		ex = self.ex
 
-		df_abd = sample_df.query(f"{identifier} == '{feature}' & kind == '+' & io == 'i'")[
+		df_abd = sample_df.query(f"{identifier} == '{feature}' & ({global_query})")[
                 [identifier, 'r', 'name', 'desc_short', 'abundance', 'enrichment', 'start', 'end', 'enr_p_value'] + list(ex.pheno_names)]
 
 		df_abd[list(ex.pheno_names)] = df_abd[list(ex.pheno_names)].fillna("?")
