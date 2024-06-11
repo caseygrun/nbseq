@@ -100,7 +100,7 @@ def find_similar_features(query, db=None, space='CDR3', ft=None, fd=None, verbos
 	space : str
 		name of feature space to query; options include: 'AA', 'CDR', 'CDR3'
 	db : optional
-		str path to a mmseqs2 database; if not given, will be inferred from space
+		str path to a mmseqs2 database; if not given, will be inferred from space, i.e. 'intermediate/{space.lower()}/features_db/features'
 	fd : pd.DataFrame or pd.Series, optional
 		if given, this feature data will be joined to the resultint matches;
 		should be feature data, where the index uses the same identifer as
@@ -108,6 +108,8 @@ def find_similar_features(query, db=None, space='CDR3', ft=None, fd=None, verbos
 	ft : AnnData, optional
 		if given and fd is None, feature data from ft.var will be joined to the
 		results
+	**kwargs : dict, optional
+		additional kwargs are passed to :func:`db.search_mmseqs2`
 
 	Returns
 	-------
@@ -131,7 +133,7 @@ def find_similar_features(query, db=None, space='CDR3', ft=None, fd=None, verbos
 	if db is None:
 		db = f'intermediate/{space.lower()}/features_db/features'
 	matches = (
-		search_mmseqs2(query, db, conda='mmseqs2-vsearch',
+		search_mmseqs2(query, db, 
 				verbose=verbose, **kwargs)
 			.rename(columns={
 				'qseqid':f'query_{identifier}',
