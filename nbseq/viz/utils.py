@@ -778,7 +778,7 @@ def extract_encoded_data(chart, d=None, overwrite={}, extra_fields = [], view_na
     additional column listing the view title (e.g. set using `.properties(title='TITLE')`) or the auto-generated view 'name' (e.g. 'view_NN') from which each data
     point came. This is useful for charts with multiple subplots. You can could then separate out these DataFrames and drop extra columns like this:
 
-        >>> df = extract_encoded_data(ch, view_name_col='subplot')
+        >>> df = extract_encoded_data(chart, view_name_col='subplot')
         >>> for title, dff in df.groupby('subplot'):
         ...     print(title)
         ...     display(dff.dropna(axis='columns', how='all'))
@@ -786,8 +786,15 @@ def extract_encoded_data(chart, d=None, overwrite={}, extra_fields = [], view_na
     To use this function for a Vega-lite plot within a dashboard visualization from nbseq.viz.dash, click the three dots and select "View Source," then copy
     the JSON source code into this snippet:
 
+        >>> import altair as alt
         >>> chart = alt.Chart.from_json('''JSON_SOURCE_HERE''')
-        >>> extract_encoded_data(chart, view_name_col='subplot')
+        >>> df = extract_encoded_data(chart, view_name_col='subplot')
+
+    For the selection_group_dashboard, you may want to use this overwrite:
+
+        >>> df = extract_encoded_data(chart, view_name_col='subplot', overwrite={'f_samples_pos_sig_jitter': 'f_samples_pos_sig', 'binary_nlogp_jitter': 'binary_nlogp'})
+
+
 
     Parameters
     ----------
