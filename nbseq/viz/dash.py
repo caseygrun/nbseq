@@ -99,7 +99,7 @@ def selection_group_vhh_overview(df, point_selector=None, feature_scale=None, tr
                  alt.Tooltip('pct_prod_pvalue_pos', format='.2g'),
                  alt.Tooltip('pct_prod_pvalue_neg', format='.2g'), 
         ]
-    ).properties(width=200, height=200)
+    ).properties(title='A', width=200, height=200)
 
     # pct product p-value, pos/neg
     chart2 = alt.Chart(df).mark_point().encode(
@@ -122,7 +122,7 @@ def selection_group_vhh_overview(df, point_selector=None, feature_scale=None, tr
                  alt.Tooltip('pct_prod_pvalue_neg', format='.2g'),
                  alt.Tooltip('n_samples_finite_neg', format='.0f'),
                  ],
-    ).properties(width=200, height=200)
+    ).properties(title='B', width=200, height=200)
 
     # mean enrichment, pos/neg
     chart3 = alt.Chart(df).mark_point().encode(
@@ -138,7 +138,7 @@ def selection_group_vhh_overview(df, point_selector=None, feature_scale=None, tr
                  alt.Tooltip('mean_enrichment_pos', format='.2g'),
                  alt.Tooltip('n_samples_finite_neg', format='.0f'),
                  alt.Tooltip('mean_enrichment_neg', format='.2g')],
-    ).properties(width=200, height=200)
+    ).properties(title='C', width=200, height=200)
 
     # start/end abundance
     _extents = (
@@ -160,7 +160,7 @@ def selection_group_vhh_overview(df, point_selector=None, feature_scale=None, tr
                  alt.Tooltip('mean_start', format='.2g'),
                  alt.Tooltip('mean_end', format='.2g'),
                  alt.Tooltip('mean_enrichment_pos', format='.2g')],
-    ).properties(width=200, height=200)
+    ).properties(title='D', width=200, height=200)
 
     charts = [chart1, chart2, chart3, chart4]
 
@@ -191,7 +191,7 @@ def selection_group_vhh_overview(df, point_selector=None, feature_scale=None, tr
                 # tooltip=['feature'],
                 tooltip=['feature','mn', alt.Tooltip('n_samples_finite_pos', format='.0f'), 'seq']
             )
-        ).interactive()
+        ).properties(title='H').interactive()
         # chart5 = plot_tree_alt(
         #     tree, 
         #     features = df['feature'], 
@@ -479,6 +479,8 @@ def enrichment_abundance_plot(df, selector, feature_scale, features=None):
         size=_size,
         facet=alt.Facet('name:O', header=alt.Header(labels=False), title=None)
     ).properties(width=100, height=100).interactive()  # .interactive()
+
+    # df[['end','enrichment','feature','name']]
     return enrabdplot
 
 
@@ -785,13 +787,13 @@ def _make_overview(df_samples_top, df_features, feature_col, tree=None, initial_
             # enrichment_rank_plot(
             enrichment_abundance_plot(
                 df, selector=selector,
-                features=features, feature_scale=feature_scale),
+                features=features, feature_scale=feature_scale).properties(title='E'),
             feature_traceplot(
                 df, selector=selector,
-                features=features, feature_scale=feature_scale).transform_filter(selector),
+                features=features, feature_scale=feature_scale).transform_filter(selector).properties(title='F'),
             feature_barplot(
                 df, selector=selector,
-                features=features, feature_scale=feature_scale)
+                features=features, feature_scale=feature_scale).properties(title='G')
         ),
         resolve=alt.Resolve(scale={'color': 'independent'})
     ).add_params(selector)  # .configure_header(labels=False, title=None)
@@ -1383,8 +1385,8 @@ def feature_selection_overview(feature, data, starting_phenotype=None):
     # ).add_params(phenotype_selector).transform_calculate(grouping_color='datum[phenotype_selector]')
 
     chart = (
-        chart_abd_trace.add_params(_scales) |
-        enrabdplot.add_params(brush)
+        chart_abd_trace.add_params(_scales).properties(title='A') |
+        enrabdplot.add_params(brush).properties(title='B')
     ).transform_calculate(grouping_color='datum[phenotype_selector]').add_params(phenotype_selector, phenotype_value_selector)
 
     return chart
