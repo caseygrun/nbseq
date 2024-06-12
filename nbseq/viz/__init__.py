@@ -573,6 +573,55 @@ class ExperimentVisualizer():
 										  relative='pre') + facet_grid('feature ~ partition')
 		return (logos, sample_plots)
 
+	def feature_tree(self, space, seq_position, seq_col=None, **kwargs):
+		"""plot a phylogeny of features in a feature space; optionally plot the sequences alongside
+
+		Parameters
+		----------
+		space : str
+			feature space
+		seq_position : str
+			position of the sequence chart relative to the tree, or `None` to hide the sequence chart, options are 'left', 'right', and None; by default 'right'
+		seq_col : str, optional
+			which column of the feature space metadata (`var`) to use for the sequences; by default, 'CDR3' for space = 'cdr3', 'AA' for space = 'aa', otherwise must be specified
+		**kwargs : dict, optional
+			additional kwargs are passed to :func:`tree.plot_tree_seq`
+			
+		Returns
+		-------
+		alt.Chart
+			chart
+
+		Raises
+		------
+		ValueError
+			if seq_col is not specified and space is not 'cdr3' or 'aa'
+		"""
+		from .tree import plot_tree_seq
+		from ..ft import fortify_features
+		from ..asvs import get_identifier
+		space = space.lower()
+
+		identifier = get_identifier(space)
+
+		df = fortify_features(self.ex.fts[space]).reset_index()
+		df['feature'] = df[identifier]
+		tree = self.ex.tree[space]
+
+		if seq_position:
+			if seq_col is None:
+				if space == 'cdr3':
+					seq_col='CDR3'
+				elif space == 'aa':
+					seq_col = 'AA'
+				else: 
+					raise ValueError(f"Must specific `seq_col` for feature space {space}")
+
+		return plot_tree_seq(df, 
+                  tree, seq_col=seq_col, 
+				  seq_position=seq_position,
+                  **kwargs)
+
 	def selection_phenotype_grid(self, query="1"):
 		from ..pheno import selection_phenotype_grid
 
