@@ -93,7 +93,7 @@ def draw(
         try:
             import pylab as plt
         except ImportError:
-            raise MissingPythonDependencyError(
+            raise ValueError(
                 "Install matplotlib or pylab if you want to use draw."
             ) from None
 
@@ -388,52 +388,71 @@ def layout_tree(
     *args,
     **kwargs,
 ):
-    """Plot the given tree using matplotlib (or pylab).
-    The graphic is a rooted tree, drawn with roughly the same algorithm as
-    draw_ascii.
-    Additional keyword arguments passed into this function are used as pyplot
-    options. The input format should be in the form of:
-    pyplot_option_name=(tuple), pyplot_option_name=(tuple, dict), or
-    pyplot_option_name=(dict).
-    Example using the pyplot options 'axhspan' and 'axvline'::
-        from Bio import Phylo, AlignIO
-        from Bio.Phylo.TreeConstruction import DistanceCalculator, DistanceTreeConstructor
-        constructor = DistanceTreeConstructor()
-        aln = AlignIO.read(open('TreeConstruction/msa.phy'), 'phylip')
-        calculator = DistanceCalculator('identity')
-        dm = calculator.get_distance(aln)
-        tree = constructor.upgma(dm)
-        Phylo.draw(tree, axhspan=((0.25, 7.75), {'facecolor':'0.5'}),
-        ... axvline={'x':0, 'ymin':0, 'ymax':1})
-    Visual aspects of the plot can also be modified using pyplot's own functions
-    and objects (via pylab or matplotlib). In particular, the pyplot.rcParams
-    object can be used to scale the font size (rcParams["font.size"]) and line
-    width (rcParams["lines.linewidth"]).
-    :Parameters:
-        label_func : callable
-            A function to extract a label from a node. By default this is str(),
-            but you can use a different function to select another string
-            associated with each node. If this function returns None for a node,
-            no label will be shown for that node.
-        do_show : bool
-            Whether to show() the plot automatically.
-        show_confidence : bool
-            Whether to display confidence values, if present on the tree.
-        axes : matplotlib/pylab axes
-            If a valid matplotlib.axes.Axes instance, the phylogram is plotted
-            in that Axes. By default (None), a new figure is created.
-        branch_labels : dict or callable
-            A mapping of each clade to the label that will be shown along the
-            branch leading to it. By default this is the confidence value(s) of
-            the clade, taken from the ``confidence`` attribute, and can be
-            easily toggled off with this function's ``show_confidence`` option.
-            But if you would like to alter the formatting of confidence values,
-            or label the branches with something other than confidence, then use
-            this option.
-        clade_colors : dict or callable
-            A function or a dictionary specifying the color of the tip label.
-            If the tip label can't be found in the dict or clade_colors is
-            None, the label will be shown in black.
+    """Convert the given tree into a set of nodes and edges for the sake of plotting
+    
+    Adapted from BioPython Bio.Phylo._utils.draw, Copyright (C) 2009 by Eric Talevich (eric.talevich@gmail.com), BSD License
+    https://github.com/biopython/biopython/blob/master/Bio/Phylo/_utils.py
+
+
+    Parameters
+    ----------
+    tree : skbio.tree.TreeNode
+        tree
+    label_func : callable
+        A function to extract a label from a node. By default this is str(),
+        but you can use a different function to select another string
+        associated with each node. If this function returns None for a node,
+        no label will be shown for that node.
+    show_confidence : bool
+        Whether to display confidence values, if present on the tree (no-op)
+    branch_labels : dict or callable
+        A mapping of each clade to the label that will be shown along the
+        branch leading to it. By default this is the confidence value(s) of
+        the clade, taken from the ``confidence`` attribute, and can be
+        easily toggled off with this function's ``show_confidence`` option.
+        But if you would like to alter the formatting of confidence values,
+        or label the branches with something other than confidence, then use
+        this option.
+    clade_colors : dict or callable
+        A function or a dictionary specifying the color of the tip label.
+        If the tip label can't be found in the dict or clade_colors is
+        None, the label will be shown in black.
+
+    base_clade_width : int, optional
+        _description_, by default 1
+    default_clade_color : str, optional
+        _description_, by default '#000000'
+    default_label_color : str, optional
+        _description_, by default '#000000'
+    identifier : str, optional
+        record field to identify nodes, by default 'name'
+
+    Returns
+    -------
+    dict
+        - `nodes`: list of dicts of
+            - x
+            - y
+            - label: node label
+            - color: node color
+            - fill: label color
+            - is_tip: True if the 
+            - `identifier`: node identifier
+
+        - `links`: list of dicts or
+            - x
+            - y
+            - x2
+            - y2
+            - color
+            - lw 
+
+    Raises
+    ------
+    TypeError
+        _description_
+    TypeError
+        _description_
     """
 
     # Arrays that store lines for the plot of clades
@@ -650,6 +669,30 @@ def layout_tree(
 
 
 def fortify_tree(feature_data, tree, identifier=None, features=None, clade_colors=True, **kwargs):
+    """generates two dataframes representing nodes and links (connections) for the sake of plotting a tree
+
+    calls :func:`layout_tree` internally.
+
+    Parameters
+    ----------
+    feature_data : pd.DataFrame
+        DataFrame with one row per feature; must have a column corresponding to `identifier`, or must have a named index
+    tree : skbio.TreeNode
+        phylogenetic tree; tip names should correspond to entries in `feature_data[identifier]`
+    identifier : str, optional
+        name of the identifier column, e.g. 'CDR3ID'; if omitted, will use `feature_data.index.name` or, of that is None, 'feature'
+    features : iterable of str, optional
+        iterable of feaures, by default None
+    clade_colors : function or dict or bool, optional
+        function or dict mapping clade names to hex colors, or True to color non-empty clade names treating the first 6 digits as a hexadecimal color; by default True
+
+    Returns
+    -------
+    pd.DataFrame
+        nodes_df
+    pd.DataFrame
+        links_df
+    """
     import pandas as pd
     from .utils import pretty_hex
     label_func = lambda c: pretty_hex(c.name) if (c.is_tip() and (c.name is not None)) else None
@@ -695,6 +738,31 @@ def fortify_tree(feature_data, tree, identifier=None, features=None, clade_color
 
 
 def plot_tree_alt(nodes_df, links_df, identifier='feature', label='hex', feature_scale=None, nodes={}, links={}):
+    """Generates a plot of a phylogenetic tree using Altair
+
+    Parameters
+    ----------
+    nodes_df : pd.DataFrame
+        dataframe describing nodes
+    links_df : pd.DataFrame
+        dataframe describing connections between nodes
+    identifier : str, optional
+        column of `nodes_df` that identifies the nodes, by default 'feature'
+    label : str, optional
+        how to label the nodes, by default 'hex'
+    feature_scale : alt.Scale, optional
+        scale mapping `identifier`s to colors; if omitted, one will be generated, by default None
+    nodes : dict, optional
+        additional kwargs to `encode` for the nodes chart, by default {}
+    links : dict, optional
+        additional kwargs to `encode` for the links chart, by default {}
+
+    Returns
+    -------
+    alt.Chart
+        chart
+    """
+
     import altair as alt
     import pandas as pd
     
