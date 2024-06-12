@@ -134,7 +134,7 @@ def search_sql(db='sqlite:///intermediate/aa/asvs.db', single=False, table='cdrs
 		predicate = make_sql_where_clause(operator=operator, **kwargs)
 
 		if isinstance(columns, list):
-			columns = ",",join(f"`{col}`" for col in columns)
+			columns = ",".join(f"`{col}`" for col in columns)
 
 		query = f"SELECT {columns} FROM `{table}` WHERE ({predicate})"
 
