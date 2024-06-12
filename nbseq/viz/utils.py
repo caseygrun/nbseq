@@ -761,3 +761,169 @@ def abundance_sparkline(data, **kwargs):
     return sparkline(data, plot=plot_abundance_sparkline, **kwargs)
 
 
+def extract_encoded_data(chart, d=None, overwrite={}, extra_fields = [], view_name_col=None, verbose=False, datasets={}, data=None):
+    """export data that appears in an altair chart as a Pandas DataFrame
+
+    This is intended as an easy way to generate "source data" from an existing chart. Each data point will be represented by one row in the DataFrame. 
+    Each field that is encoded to a channel in the chart (e.g. X, Y, color/fill, etc.) will be represented by a column in the DataFrame. If a "title" 
+    is given for that encoding, that title will be the name of the column, otherwise it will be the original name in the source data.
+    
+    View composition operators 'facet', 'hconcat', and 'vconcat' are supported but 'repeat' is not.
+    Transformations are not supported, nor are dynamic params (or selections). You can use `overwrite` to replace these computed fields with other columns 
+    that are already in the dataset. For complex charts with multiple 'datasets' or Vega-Lite 'data' arguments, this function will do its best to find the 
+    data source corresponding to a particular view, but it may not be perfect.
+
+    If multiple views are composed (e.g. with hconcat or vconcat), one DataFrame will be generated for each view and the DataFrames will be vertically 
+    concatenated. The columns in the final DataFrame will thus be the union of all columns in all views. You can use the `view_name_col` to add an 
+    additional column listing the view title (e.g. set using `.properties(title='TITLE')`) or the auto-generated view 'name' (e.g. 'view_NN') from which each data
+    point came. This is useful for charts with multiple subplots. You can could then separate out these DataFrames and drop extra columns like this:
+
+        >>> df = extract_encoded_data(ch, view_name_col='subplot')
+        >>> for title, dff in df.groupby('subplot'):
+        ...     print(title)
+        ...     display(dff.dropna(axis='columns', how='all'))
+
+    To use this function for a Vega-lite plot within a dashboard visualization from nbseq.viz.dash, click the three dots and select "View Source," then copy
+    the JSON source code into this snippet:
+
+        >>> chart = alt.Chart.from_json('''JSON_SOURCE_HERE''')
+        >>> extract_encoded_data(chart, view_name_col='subplot')
+
+    Parameters
+    ----------
+    chart : alt.Chart
+        chart produced by alt.Chart or loaded by alt.from_json, alt.from_dict, etc.
+    d : dict, optional
+        (private, used for recursion) the Vega-Lite chart specification as dict, or a subset thereof; if omitted, will be extracted from `chart`
+    overwrite : dict, optional
+        if given keys should be names of encoding fields that you would like to replace, and values
+        should other columns in the data. For example, if color was mapped to an interactive parameter, 
+        you can replace it with a column value; by default {}
+    extra_fields : list, optional
+        additional columns from the data to add to each view by default []
+    view_name_col : str, optional
+        if given, add an additional column with this name to the output; this column will contain the title or name of the view from which each data point came from
+
+    Returns
+    -------
+    pd.DataFrame
+        data
+    """
+    import pandas as pd
+    import altair as alt
+    import warnings
+
+    def vprint(*args, **kwargs):
+        if verbose: print(*args, **kwargs)
+    
+    
+    if d is None:
+        d = chart.to_dict()
+    
+    vprint(f"step: {str(d)[:80]}...")
+    vprint(f"- data = {str(data)[:80]}")
+    
+    if 'datasets' in d:
+        datasets = {
+            **datasets, 
+            **{name: pd.DataFrame(data) for name, data in d['datasets'].items()}
+        }
+        
+    if 'data' in d:
+        vprint(f"- d['data'] = {d['data']}")
+        if 'name' in d['data']:
+            if d['data']['name'] in datasets:
+                data = datasets[d['data']['name']]
+            else:
+                raise ValueError(f"Cannot locate named dataset '{d['data']['name']}'")
+        elif 'values' in d['data']:
+            data = pd.DataFrame(d['data']['values'])
+        else:
+            raise NotImplementedError(f"Cannot process vega-lite data directive {d['data']}")
+    if data is None:
+        data = chart.data
+
+    
+    dfs = []
+    for operator in ['vconcat', 'hconcat']:
+        if operator in d:
+            for c in d[operator]:
+                dfs.append(extract_encoded_data(chart, c, overwrite=overwrite, extra_fields=extra_fields, view_name_col=view_name_col, verbose=verbose, datasets=datasets, data=data))
+    if len(dfs) > 0:
+        return pd.concat(dfs)
+    
+    fields = []
+    
+    def parse_encoding(o):
+        channels = list(o.keys())
+
+        # move these channels to the front of the line if present, that way those columns appear first in the data
+        for channel in 'row', 'column', 'facet':
+            if channel in channels: 
+                channels.insert(0, channels.pop(channels.index(channel)))
+                
+        for channel in channels:
+            encoding = o[channel]
+            field = None
+            title = None
+            if 'field' in encoding:
+                field = encoding['field']
+            if 'title' in encoding and encoding['title'] is not None:
+                title = encoding['title']
+            else: title = field
+                
+            if field is not None:
+                fields.append((field, title))
+                
+    if 'facet' in d:
+        parse_encoding(d['facet'])
+    if 'encoding' in d:
+        parse_encoding(d['encoding'])
+    if 'spec' in d:
+        if 'encoding' in d['spec']:
+            parse_encoding(d['spec']['encoding'])
+        if 'layer' in d['spec']:
+            for layer in d['spec']['layer']:
+                if 'encoding' in layer:
+                    parse_encoding(layer['encoding'])
+    if 'title' in d:
+        name = d['title']
+    elif 'name' in d:
+        name = d['name']
+    else:
+        name = None
+        
+    # if field name is in the "overwrite" dict, replace
+    fields = [((overwrite[f], title) if f in overwrite else (f,title)) for f, title in fields]
+
+
+    if data is alt.Undefined:
+        if len(fields) > 0:
+            raise ValueError(f"Could not locate data for view where fields {fields} are mapped; view (or parent views) did not have embedded 'data' statement and chart.data is Undefined")
+        else:
+            return pd.DataFrame()
+    
+    # add extra fields
+    fields = fields + [(ef if isinstance(ef, tuple) else (ef, ef)) for ef in extra_fields]
+
+    # deduplicate fields, preserving order
+    fields = list(dict.fromkeys(fields))
+    
+    # filter fields to only those in the chart
+    columns = []
+    titles = []
+    for (field, title) in fields:
+        if field not in data:
+            warnings.warn(f"Column '{field}' not found in chart data, removing")
+        else:
+            columns.append(field)
+            titles.append(title)
+
+    df = pd.DataFrame(data[columns])
+    df.columns = titles
+    vprint(f"- columns {columns}")
+    vprint(f"- renamed {titles}")
+    if (view_name_col is not None) and (name is not None):
+        df.insert(0, view_name_col, name)
+    vprint(f"return {str(df.columns)[:80]}...")
+    return df
