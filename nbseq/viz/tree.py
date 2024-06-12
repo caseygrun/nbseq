@@ -820,3 +820,130 @@ def plot_tree_alt(nodes_df, links_df, identifier='feature', label='hex', feature
         # .configure_view(strokeOpacity=0)
     )
     return chart
+
+
+def plot_tree_seq(df, 
+                  tree, seq_col=None, 
+                  nodes=dict(), links=dict(), seq_nodes=dict(), text=dict(), seq_position='right',
+                  height=800,
+                  width=400,
+                  alignment_width=None,
+                  **kwargs):
+    """plots a tree of features, optionally alongside an alignment of feature sequences
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        dataframe, one row per feature
+    tree : skbio.tree.TreeNode
+        phylogenetic tree, tip names must correspond to rows in df
+    seq_col : str, optional
+        name of column in `df` which corresponds to the feature sequence; must be given if `seq_position` is not None
+    nodes : dict, optional
+        additional kwargs to `encode` for the nodes chart, by default {}
+    links : dict, optional
+        additional kwargs to `encode` for the links chart, by default {}
+    seq_nodes : dict, optional
+        additional kwargs to `encode` for the sequence nodes chart, by default {}
+    text : dict, optional
+        additional kwargs to `encode` for the sequence text chart, by default {}
+    seq_position : str, optional
+        position of the sequence chart relative to the tree, or `None` to hide the sequence chart, options are 'left', 'right', and None; by default 'right'
+    height : int, optional
+        height of the plot in pixels, by default 800
+    width : int, optional
+        width of the tree plot in pixels, by default 400
+    alignment_width : int, optional
+        width of the sequence alignment plot in pixels, by default 20 px * the length of the sequnce
+    **kwargs : dict, optional
+        Additional kwargs passed to :func:`plot_tree_alt`
+        
+    Returns
+    -------
+    alt.Chart
+        chart
+    """
+
+    from .sample import alt_scale_features
+    from .utils import hash_to_mn_short
+    import altair as alt
+
+
+    # df = nbseq.ft.fortify_features(ex.fts.cdr3).reset_index()
+    # df['feature'] = df['CDR3ID']
+    _features = df['feature'].unique()
+
+    n = len(_features)
+    feature_scale = alt_scale_features(_features, sort=True)
+
+    df['mn'] = df['feature'].apply(hash_to_mn_short)
+
+    nodes_df, links_df = fortify_tree(
+        # df[['feature','mn', 'n_samples_finite_pos', 'f_samples_pos_sig', 'binary_nlogp', 'seq']].set_index('feature'), 
+        df.set_index('feature'),
+        tree, identifier='feature', features=df['feature'])
+
+    point_selector = None
+    if point_selector is None:
+        point_selector = alt.selection_point(
+            fields=['feature'], on="click[!event.altKey]", clear="dblclick[!event.altKey]")
+
+    # hover_selector = alt.selection_point(
+    #         fields=['feature'], on="pointerover", nearest=True)
+
+    _opacity = alt.condition(point_selector,
+                            alt.value(1), alt.value(0.05))
+
+
+    tree_chart = plot_tree_alt(nodes_df, links_df, identifier='feature', label='hex',
+        feature_scale=feature_scale,
+        nodes={
+            **dict(
+                fill=alt.Fill('feature', scale=feature_scale, 
+                            legend = None
+                            # legend=alt.Legend(columns=n//20,symbolLimit=0,labelExpr="slice(datum.value,0,6)")
+                            ),
+                color=alt.value(None),
+                opacity=_opacity, #alt.condition(point_selector, alt.value(1), alt.value(0.1)),
+                tooltip=['feature','mn'],
+                # tooltip=['feature','mn', alt.Tooltip('n_samples_finite_pos', format='.0f'), 'seq']
+            ), **nodes
+        }, links=links, **kwargs
+    ).properties(width=width,height=height)
+
+    if seq_position:
+        if alignment_width == None:
+            alignment_width = len(nodes_df[seq_col][0]) * 10
+
+        seq_chart = (
+            alt.Chart(nodes_df).mark_text(align='left', dx=10, font='monospace').encode(**{
+                **dict(
+                    x=alt.value(10),
+                    y=alt.Y('y', axis=None),
+                    text=seq_col,
+                    opacity=_opacity,
+                    tooltip=['feature','mn'],
+                ),
+                **seq_nodes 
+            }) + alt.Chart(nodes_df).mark_point().encode(**{
+                **dict(
+                    x=alt.value(10),
+                    y=alt.Y('y', axis=None),
+                    fill=alt.Fill('feature', scale=feature_scale, 
+                                legend = None
+                                # legend=alt.Legend(columns=n//20,symbolLimit=0,labelExpr="slice(datum.value,0,6)")
+                                ),
+                    color=alt.value(None)
+                ),
+                **text
+            })
+        ).properties(width=alignment_width,height=height)
+
+    if seq_position == 'right':
+        chart = tree_chart | seq_chart
+    elif seq_position == 'left':
+        chart = seq_chart | tree_chart
+    else:
+        chart = tree_chart
+
+    return chart.interactive().add_params(point_selector)
