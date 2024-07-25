@@ -838,13 +838,13 @@ def extract_encoded_data(chart, d=None, overwrite={}, extra_fields = [], view_na
         
     if 'data' in d:
         vprint(f"- d['data'] = {d['data']}")
-        if 'name' in d['data']:
+        if 'values' in d['data']:
+            data = pd.DataFrame(d['data']['values'])
+        elif 'name' in d['data']:
             if d['data']['name'] in datasets:
                 data = datasets[d['data']['name']]
             else:
                 raise ValueError(f"Cannot locate named dataset '{d['data']['name']}'")
-        elif 'values' in d['data']:
-            data = pd.DataFrame(d['data']['values'])
         else:
             raise NotImplementedError(f"Cannot process vega-lite data directive {d['data']}")
     if data is None:
@@ -934,3 +934,119 @@ def extract_encoded_data(chart, d=None, overwrite={}, extra_fields = [], view_na
         df.insert(0, view_name_col, name)
     vprint(f"return {str(df.columns)[:80]}...")
     return df
+
+def extract_encoded_data_plotnine(g, verbose=False):
+    """export data from a plotnine figure as a Pandas DataFrame
+
+    This is intended as an easy way to generate "source data" from an existing chart. Each data point will be represented by one row in the DataFrame. 
+    Each field that is encoded to a channel in the chart (e.g. X, Y, color/fill, etc.) will be represented by a column in the DataFrame. If that channel
+    is given a name, either via a scale, a guide, or a label (in that order of preference), that title will be the name of the column, otherwise 
+    the column name will be the same as in the source data frame. 
+    Channels used for faceting will also be included. If the chart has a title, it will be included in a column called 'title'.
+    If a channel is bound to an expression or formula, each column referenced in the formula will be included in the output (under its original name in the 
+    source data), but the calculated formula value will not.
+
+    Parameters
+    ----------
+    g : ggplot
+        chart created by plotnine.ggplot
+    verbose : bool, optional
+        True to print extra information
+
+    Returns
+    -------
+    pd.DataFrame
+        data
+    """
+    import pandas as pd
+
+    def vprint(*args, **kwargs):
+        if verbose: print(*args, **kwargs)
+    
+    # keys = columns in data
+    # values = labels
+    fields = {}
+
+    vprint("scales:")
+    scales = {}
+    for scale in g.scales:
+        if hasattr(scale, 'name') and scale.name:
+            vprint(f"- named scale '{scale.name}' for aes {scale.aesthetics}: {scale} ")
+            for aes in scale.aesthetics:
+                scales[aes] = scale.name
+        else:
+            vprint(f"- unnamed scale for aes {scale.aesthetics}: {scale} ")
+    vprint("")
+
+    # collect fields for each faceting variable
+    if hasattr(g, 'facet'):
+        if hasattr(g.facet, 'vars'):
+            for var in g.facet.vars:
+                fields[var] = var
+                vprint(f"facet --> '{var}'")
+        else:
+            if hasattr(g.facet, 'cols'):
+                for var in g.facet.cols:
+                    fields[var] = var
+                    vprint(f"facet col '{var}'")
+            if hasattr(g.facet, 'rows'):
+                for var in g.facet.rows:
+                    fields[var] = var
+                    vprint(f"facet row '{var}'")
+
+    # collect fields for each channel
+    for channel, field in g.mapping.items():
+        vprint(f"{channel} --> {field}")
+        
+        if channel in scales:
+            fields[field] = scales[channel]
+            vprint(f"  {field} --> '{fields[field]}' (scale)")
+            
+        # if a legend guide has been assigned for this channel and has a title, use that as column title in output
+        elif hasattr(g, 'guides') and channel in g.guides and g.guides[channel].title:
+            fields[field] = g.guides[channel].title
+            vprint(f"  {field} --> '{fields[field]}' (guide)")
+        
+        # if a label has been assigned to that channel, use that as column title in output
+        elif hasattr(g.labels, channel):
+            fields[field] = getattr(g.labels, channel)
+            vprint(f"  {field} --> '{fields[field]}' (labels)")
+
+        # otherwise use the column name in the original dataset
+        else:
+            fields[field] = fields[field]
+
+    # locate each field, insert into dataframe template
+    df = {}
+    for field, title in fields.items():
+        # if `field` contains a column name, copy that column
+        if field in g.data:
+            df[title] = g.data[field]
+        else:
+            # otherwise, treat `field` as an expression
+            import ast
+
+            vprint(f"evaluating '{field}':")
+            # copy the names of any columns
+            for node in ast.walk(ast.parse(field)):
+                if isinstance(node, ast.Name) and node.id in g.data.columns:
+                    vprint(f"  --> '{node.id}'")
+                    df[node.id] = g.data[node.id]
+
+            # and put the evaluated expression in there too
+            # df[title] = g.data.eval(field)
+    
+    df = pd.DataFrame(df)
+    
+    # extract data for encoded fields
+    # df = g.data[list(fields.keys())].copy()
+
+    # rename as appropriate
+    # df.columns = list(fields.values())
+
+    # if there is a title label, insert that first
+    if hasattr(g.labels, 'title') and g.labels.title and 'title' not in df.columns:
+        df.insert(0,'title', g.labels.title)
+        vprint(f"'title' --> '{g.labels.title}'")
+
+    return df.drop_duplicates()
