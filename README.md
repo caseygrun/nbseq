@@ -1,4 +1,6 @@
-Library for processing nanobody (VHH) sequencing data.
+# `nbseq`: Python library for processing nanobody (VHH) sequencing data.
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.12814410.svg)](https://doi.org/10.5281/zenodo.12814410)
 
 This package is intended to be used in two ways:
 
@@ -7,7 +9,7 @@ This package is intended to be used in two ways:
 2) interactively within Jupyter notebooks to query, calculate, and visualize the resulting data structures.
 
 
-To explore the code used in our paper, start with the [`phage-seq` repository](http://github.com/caseygrun/phage-seq). That repository also includes several demonstration notebooks and datasets to explore the functionality of this library. Follow the instructions there to create or obtain an example dataset, then return to this repository for instructions on how to install `nbseq` for interactive analysis.
+To explore the code used in our paper (Grun et al., _Nat. Commun._ 2024), start with the [`phage-seq` repository](http://github.com/caseygrun/phage-seq). That repository also includes several demonstration notebooks and datasets to explore the functionality of this library. Follow the instructions there to create or obtain an example dataset, then return to this repository for instructions on how to install `nbseq` for interactive analysis.
 
 ## Installation and usage
 
