@@ -405,6 +405,13 @@ class Experiment:
 			self._phenotype_matrix = self.obs.loc[:,self.pheno_names]
 		return self._phenotype_matrix
 
+	@property
+	def phenotypes(self):
+		if self._phenotypes is not None:
+			return self._phenotypes
+		else:
+			return pd.DataFrame()
+
 	def get_feature_positions(self, library='alpaca', aa=True):
 		""" Get start/end position of each configured feature for the given library
 		"""
