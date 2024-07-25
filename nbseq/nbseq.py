@@ -118,7 +118,7 @@ class Experiment:
 				for _phenotype in _phenotype_names:
 					if _phenotype not in self.fts[_space].obs:
 						print(f"Warning: phenotype {_phenotype} not in obs data for feature table {_space}. Adding column of NAs")
-						self._fts[_space].obs[_phenotype] = pd.NA
+						self._fts[_space].obs[_phenotype] = np.nan # pd.NA
 
 		self._sql_db = sql_db
 		self._mmseqs_dbs = {k.lower(): v for k, v in mmseqs_dbs.items()}
