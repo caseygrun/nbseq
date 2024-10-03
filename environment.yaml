@@ -9,6 +9,7 @@ dependencies:
     # - altair==5.1.2
     - mnemonicode==1.4.5
     - "git+https://github.com/caseygrun/nbseq.git#egg=nbseq"
+    - "git+https://github.com/caseygrun/plates.git#egg=microplates"
   # - altair-transform=0.2.0
   - altair-all=5.3.0
   - anndata=0.9.2
